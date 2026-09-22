@@ -1,0 +1,40 @@
+{
+  "name": "docugate",
+  "version": "0.1.0",
+  "description": "Command-line tools for DocuGate: set up, check and prepare the documentation DocuGate reads straight from your repository.",
+  "type": "module",
+  "bin": {
+    "docugate": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "docugate",
+    "documentation",
+    "docs",
+    "markdown",
+    "openapi",
+    "github",
+    "cli"
+  ],
+  "homepage": "https://www.trydocugate.site",
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2"
+  }
+}
