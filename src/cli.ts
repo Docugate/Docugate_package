@@ -8,7 +8,7 @@ import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
 
 const SITE = 'https://www.trydocugate.site'
 
-const HELP = `docugate — set up and check the docs DocuGate reads from your repository
+const HELP = `docugate: set up and check the docs DocuGate reads from your repository
 
 Usage
   npx docugate <command> [options]
@@ -113,7 +113,7 @@ async function main() {
     case 'check': {
       const result = check(root, one('dir'))
       const strict = args.bools.has('strict')
-      console.log(`docugate check ${dim(`— ${result.docsDir}/, ${plural(result.pages, 'page')}`)}`)
+      console.log(`docugate check ${dim(`(${result.docsDir}/, ${plural(result.pages, 'page')})`)}`)
       report('error', result.errors, red)
       report('warn', result.warnings, yellow)
 
