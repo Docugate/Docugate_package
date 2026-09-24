@@ -5,13 +5,26 @@ documentation straight from the markdown in your GitHub repository and decides
 who may read it.
 
 ```sh
-npx docugate init     # set this repository up for DocuGate
-npx docugate check    # check the docs the way DocuGate will read them
-npx docugate openapi  # prepare an OpenAPI spec for the API reference
+npm i -g docugate
 ```
 
-Works with npm, pnpm, yarn and bun. Requires Node 18.17 or later. Run every
-command from the root of your repository.
+```sh
+docugate init     # set this repository up for DocuGate
+docugate check    # check the docs the way DocuGate will read them
+docugate openapi  # prepare an OpenAPI spec for the API reference
+```
+
+Installing the command once is usually simpler than reaching for a package
+manager in each repository: it needs no `package.json`, so it works just as
+well in a Go, Python or Flutter repository as in a JavaScript one. One space
+can read from several repositories, and they are rarely all the same language.
+
+If you would rather not install it globally, `npm i -D docugate` adds it to a
+single Node project, which also pins the version for CI; `npx docugate` runs it
+without installing anything. Both work with pnpm, yarn and bun too.
+
+Requires Node 18.17 or later. Run every command from the root of your
+repository.
 
 ## `init`
 
@@ -20,7 +33,7 @@ Creates a `docugate.json` and, if your docs folder has no markdown yet, a first
 that already has docs.
 
 ```sh
-npx docugate init --dir docs --title "Acme API"
+docugate init --dir docs --title "Acme API"
 ```
 
 Then push, and publish the space from your
@@ -62,7 +75,7 @@ you want published: only the public paths, without sensitive fields, with keys
 in a stable order so it reviews cleanly in a pull request.
 
 ```sh
-npx docugate openapi --from http://localhost:3000/openapi.json \
+docugate openapi --from http://localhost:3000/openapi.json \
   --exclude "/internal/**" --redact passwordHash --out openapi.json
 ```
 

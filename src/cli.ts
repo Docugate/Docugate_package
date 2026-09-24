@@ -11,7 +11,7 @@ const SITE = 'https://www.trydocugate.site'
 const HELP = `docugate: set up and check the docs DocuGate reads from your repository
 
 Usage
-  npx docugate <command> [options]
+  docugate <command> [options]
 
 Commands
   init        Set up this repository for DocuGate
@@ -72,7 +72,7 @@ function parse(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`${red('error')} ${message}\n${dim('Run `npx docugate --help` for usage.')}`)
+  console.error(`${red('error')} ${message}\n${dim('Run `docugate --help` for usage.')}`)
   process.exit(2)
 }
 
@@ -147,7 +147,7 @@ async function main() {
           console.log(`${green('up to date')}  ${output} ${dim(`(${summary})`)}`)
         } else {
           console.log(`${red('out of date')}  ${output} does not match ${from}.`)
-          console.log(dim('Run `npx docugate openapi` and commit the result.'))
+          console.log(dim('Run `docugate openapi` and commit the result.'))
           process.exitCode = 1
         }
         return
