@@ -72,7 +72,11 @@ function parse(argv: string[]): Args {
 }
 
 function fail(message: string): never {
-  console.error(`${red('error')} ${message}\n${dim('Run `docugate --help` for usage.')}`)
+  // Phrased without a command name on purpose: this is the message somebody
+  // sees when they are already stuck, and it would be wrong for half of them.
+  // `docugate --help` is not a thing you can run if you reached this through
+  // npx, and `npx docugate --help` is not one if you installed it.
+  console.error(`${red('error')} ${message}\n${dim('See --help for usage.')}`)
   process.exit(2)
 }
 
