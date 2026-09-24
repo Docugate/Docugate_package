@@ -1,7 +1,7 @@
 # docugate
 
 Command-line tools for [DocuGate](https://www.trydocugate.site), which publishes
-documentation straight from the markdown in your GitHub repository and decides
+documentation straight from the markdown in your GitHub repositories and decides
 who may read it.
 
 ```sh
@@ -16,8 +16,9 @@ docugate openapi  # prepare an OpenAPI spec for the API reference
 
 Installing the command once is usually simpler than reaching for a package
 manager in each repository: it needs no `package.json`, so it works just as
-well in a Go, Python or Flutter repository as in a JavaScript one. One space
-can read from several repositories, and they are rarely all the same language.
+well in a Go, Python or Flutter repository as in a JavaScript one. That matters
+because one DocuGate space can read from several repositories, and they are
+rarely all the same language.
 
 If you would rather not install it globally, `npm i -D docugate` adds it to a
 single Node project, which also pins the version for CI; `npx docugate` runs it
@@ -25,6 +26,20 @@ without installing anything. Both work with pnpm, yarn and bun too.
 
 Requires Node 18.17 or later. Run every command from the root of your
 repository.
+
+## Several repositories in one space
+
+A space can merge the docs from a frontend, a backend and a mobile app into one
+set of pages, so a feature that spans all three is documented once instead of
+three times. Repositories are added to a space from its settings on
+[trydocugate.site](https://www.trydocugate.site/dashboard), not from here.
+
+What that changes for this package: run `init` and `check` in **each**
+repository that contributes docs. Every one gets its own `docugate.json`, naming
+its own docs folder. `check` reads the repository it is run in, which is why its
+300-page limit is per repository rather than per space.
+
+See [Merging repositories](https://www.trydocugate.site/docs/merging-repositories).
 
 ## `init`
 
@@ -65,8 +80,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npx docugate check
+      - run: npx docugate@0.1 check
 ```
+
+Pin the version in CI, as above, or add the package to the repository and run
+it from there. Without a pin, the rules being enforced can change between two
+runs of the same workflow, which turns a green build red with nothing in the
+commit to explain it.
 
 ## `openapi`
 
@@ -115,11 +135,13 @@ soon. See the
 
 ## `docugate.json`
 
+One per repository, at its root.
+
 | Key | Meaning |
 | --- | --- |
 | `docsDir` | The folder DocuGate reads. Defaults to `docs`. |
 | `title` | The space's title. |
-| `sidebar` | File and folder names in the order the sidebar should show them. |
+| `sidebar` | File and folder names in the order the sidebar should show them. Orders this repository's own pages, not the whole space. |
 | `api.generate` | Defaults for `docugate openapi`. |
 
 ## Licence
