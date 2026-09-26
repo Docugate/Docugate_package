@@ -34,39 +34,44 @@ session summary.
 
 ---
 
-## Task 1: demo app and a hand-written tour
+## Task 1: the first tour, written by Bob from the demo's code
 
-> Create a small demo app in `examples/invoices/` using Vite and plain
-> TypeScript, with no framework. It has three screens routed by
-> `location.pathname`: `/invoices` (a table of invoices), `/invoices/:id`
-> (one invoice with status, customer and total) and `/customers`. All data
-> comes from `src/api.ts`, which uses `fetch` to call `GET /api/invoices`,
-> `GET /api/invoices/:id` and `GET /api/customers`. In dev, a small Vite
-> middleware plugin serves those from JSON fixtures in `fixtures/`. Put one
-> screen per file in `src/screens/`. Add `data-tour="..."` attributes to the
-> elements a new developer would ask about: the invoice table, the status
-> badge, the total and the customer name.
->
-> Then hand-write `examples/invoices/.docugate/tour/invoice-detail.md` in this
-> exact format, with one `##` section per tagged element on that screen:
+The demo app is **Ledgerly**, a small billing app in its own repo
+([Docugate/docugate-demo](https://github.com/Docugate/docugate-demo)), with a
+React `frontend/` and a Hono `backend/`. Clone it next to this repo
+(`Documents/GitHub/docugate-demo`) and **open the demo in Bob for this task
+only.** Tasks 2 to 6 run in this repo.
+
+> Read this codebase: `frontend/src/` (screens, `api.ts`) and `backend/src/`
+> (routes and `billing.ts`). Write `.docugate/tour/invoice-detail.md` at the
+> repo root: a tour of the `/invoices/:id` screen for a developer who is new to
+> the codebase. Add one stop for each element with a `data-tour` attribute on
+> that screen. For each stop, trace where the value really comes from: the
+> endpoint and field the frontend reads, and the backend file where the value
+> is computed. Use exactly this format, with paths relative to the repo root:
 >
 > ```md
 > ---
 > route: /invoices/:id
-> title: Invoice detail
+> title: Invoice
 > ---
 >
 > ## Total
 > target: [data-tour="invoice-total"]
 > data: GET /api/invoices/:id → total
-> code: src/screens/invoice-detail.ts
+> code: frontend/src/screens/InvoiceDetail.tsx
+> source: backend/src/billing.ts
 > docs: https://www.trydocugate.site/docs
 >
-> The amount due, tax included, exactly as the API returns it.
+> The amount due: the line items' subtotal plus 18% tax, computed by
+> `totals()` in the backend. It is never stored.
 > ```
 >
-> Done when `npm install && npm run dev` in `examples/invoices` shows all
-> three screens with data.
+> Only claim what the code shows. Keep the prose to one or two sentences
+> per stop. Don't change any other file.
+>
+> Done when every `data-tour` element on the invoice screen has a stop, and
+> each stop's `code` and `source` files exist.
 
 ## Task 2: tour format, parser and checks
 
