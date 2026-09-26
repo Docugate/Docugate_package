@@ -1,6 +1,6 @@
 # Bob prompt pack
 
-Five tasks for Bob IDE. Each one is a separate Bob task, so each gets its own
+Six tasks for Bob IDE. Each one is a separate Bob task, so each gets its own
 session summary.
 
 ## Before you start
@@ -11,15 +11,14 @@ session summary.
   account and not your own.
 - You have **40 Bobcoins in total, with no top-ups.** Check usage in
   Settings → General after each task. To save them:
-  - Start a **new task** for each prompt below. A long chat costs more as it
+  - Start a **New Task** for each prompt below. A long chat costs more as it
     grows.
   - Paste the whole prompt at once. Don't drip-feed follow-ups.
   - If Bob goes off track, stop it and re-prompt with the exact file and
     error, rather than asking it to "look around".
   - Use **Plan** mode only on tasks 3 and 4, where the design matters. Go
-    straight to **Agent/Code** on the rest.
-- Never paste an API key into Bob chat. Keys go in `.env` (ignored by git and
-  by Bob) and in Vercel env vars.
+    straight to **Agent** on the rest.
+- Never paste an API key into Bob chat.
 
 ## After each task: the session summary
 
@@ -29,7 +28,9 @@ session summary.
 3. Screenshot it as PNG into `bob_sessions/`, named
    `docugate_task01_demo_app_summary.png` (team name, task number, short
    description).
-4. Commit and push.
+4. Also export the task (the export icon in the Tasks panel) into
+   `bob_sessions/`.
+5. Commit and push.
 
 ---
 
@@ -75,9 +76,10 @@ session summary.
 >
 > 1. `src/tour.ts`: `parseTourFile(text, file)` reads the front matter
 >    (`route`, `title`) and each `##` stop's `target`, `data`, `code` and `docs`
->    lines, plus the prose after them. `loadTours(dir)` reads every `.md` file
->    in `.docugate/tour/`. `matchRoute(route, pathname)` supports `:param`
->    segments.
+>    lines, plus the prose after them. `serializeTourFile(tour)` writes the
+>    same format back, keeping the prose. `loadTours(dir)` reads every `.md`
+>    file in `.docugate/tour/`. `matchRoute(route, pathname)` supports
+>    `:param` segments.
 > 2. Tour checks, run by `docugate check` when `.docugate/tour/` exists, and
 >    reported through the existing `Issue` type as warnings:
 >    - the `code` file exists
@@ -86,85 +88,107 @@ session summary.
 >    - the `code` file contains the `data-tour` value from `target`
 >    - required fields are present, and no two stops on a screen share a
 >      target
-> 3. `docugate tour --export <file>` writes all screens and stops as one JSON
->    file, for the pill to load.
-> 4. Tests in `test/tour.test.mjs` for parsing, route matching and each
->    check, using small fixture folders in `test/fixtures/`.
+> 3. Tests in `test/tour.test.mjs` for parsing, round-tripping, route matching
+>    and each check, using small fixture folders in `test/fixtures/`.
 >
 > Done when `npm test` passes, and running `docugate check` in
 > `examples/invoices` passes, then warns after renaming `invoice-total` in the
 > screen file.
 
-## Task 3: the pill (use Plan mode first)
+## Task 3: `docugate tour`, the local server (use Plan mode first)
+
+> Add a `tour` command to `src/cli.ts`, backed by `src/tour-server.ts`.
+> `docugate tour [--port 4178]` starts a Node `http` server (no framework)
+> that only listens on `127.0.0.1`, only accepts requests from localhost
+> origins, and only reads and writes inside `.docugate/tour/`:
+>
+> - `GET /tour?path=/invoices/1`: the matching screen and its stops as
+>   JSON, or 404.
+> - `GET /events`: server-sent events. Send `change` whenever a file in
+>   `.docugate/tour/` changes (`fs.watch`), so the pill updates live.
+> - `PUT /stop`: create or update one stop on a screen (screen route plus the
+>   stop's fields). Create the screen file if it doesn't exist. Write with
+>   `serializeTourFile`, change only that stop, and keep everything else in
+>   the file exactly as it was.
+> - `GET /pill.js`: serves the pill script from task 4.
+>
+> Also add `docugate tour --export <file>`, which writes every screen as one
+> JSON file. This is only for a static demo build.
+>
+> Test the endpoints with the server on a random port. Done when `npm test`
+> passes and `curl "localhost:4178/tour?path=/invoices/1"` returns the stops
+> from task 1.
+
+## Task 4: the pill and the inspector (use Plan mode first)
 
 > Create `pill/` as a separate small package, `@docugate/pill`: one plain
 > TypeScript file compiled to a single `pill.js` with no framework and no
-> dependencies. Apps load it with one `<script>` tag with
-> `data-tour-src="/tour.json"`. It renders inside a shadow DOM so the host
-> app's CSS can't affect it.
+> dependencies. Apps add one script tag,
+> `<script src="http://localhost:4178/pill.js"></script>`. It renders inside
+> a shadow DOM so the host app's CSS can't affect it. If
+> `window.DOCUGATE_TOUR` is set, it reads tours from there instead of the
+> server. That's for the static demo only.
 >
-> On load and on every URL change (patch `history.pushState` and listen for
-> `popstate`), it finds the screen whose `route` matches `location.pathname`.
-> If there is none, it draws nothing. Otherwise it shows a small pill in the
-> bottom-right corner with two actions:
+> If the local server doesn't answer, it draws nothing, so it never shows in
+> production. When it answers, it shows a small inactive pill in the
+> bottom-right corner, like the Next.js dev indicator. Clicking it opens two
+> modes:
 >
-> - **Tour this page:** step through the stops. Dim the page, draw a ring
->   around each target and show a card with the title, prose, where the data
->   comes from (`data`), the code file (`code`) and a link to the docs, plus
->   Back, Next and Done buttons. Esc closes it.
-> - **Explain:** while on, hovering any element that has a stop shows its
->   card beside it.
+> - **Walkthrough:** steps through the current screen's stops. It dims the
+>   page, draws a ring around each target and shows a card with the title,
+>   prose, where the data comes from (`data`), the code file (`code`) and a
+>   docs link, plus Back, Next and Done. It closes itself after the last stop.
+>   Esc closes it too.
+> - **Inspector:** while on, hovering an element highlights it. Clicking an
+>   element with a stop shows a popup explaining what it does and where its
+>   information comes from, with an **Edit** button. Clicking an element with
+>   no stop offers **Add to tour**, which opens a small form (title, data,
+>   code, docs, description) prefilled with a suggested `data-tour` selector.
+>   Saving sends `PUT /stop`. Warn in the form if the element has no
+>   `data-tour` attribute yet, and show the attribute to add.
 >
-> Style: dark, system font, hairline borders, small and calm, like the
-> Next.js dev indicator. Keyboard accessible, and respects
-> `prefers-reduced-motion`.
+> It re-reads the tour on URL changes (patch `history.pushState` and listen for
+> `popstate`) and on the server's `change` events. Style: dark, system font,
+> hairline borders, small and calm. Keyboard accessible, and respects
+> `prefers-reduced-motion`. Add the script tag to `examples/invoices`.
 >
-> Wire it into `examples/invoices`: export the tour with
-> `docugate tour --export public/tour.json` as part of the dev and build
-> scripts, and add the script tag.
->
-> Done when on `/invoices/1` the tour steps through every stop, and on a
-> route with no tour the pill doesn't appear.
+> Done when the walkthrough runs on `/invoices/1` and closes at the end, the
+> inspector explains the total, adding a stop on `/customers` creates
+> `.docugate/tour/customers.md`, and the pill is gone when the server is
+> stopped.
 
-## Task 4: the AI tour generator with watsonx.ai (use Plan mode first)
+## Task 5: `docugate tour scan` (the client for DocuGate's AI)
 
-> Add `src/generate.ts` to the package: `generateTour({ files, apiKey,
-> projectId, url, model })` takes the app's source files (path and content)
-> and returns tour files in the format `src/tour.ts` parses. It calls IBM
-> watsonx.ai directly with `fetch`, not an SDK: first swap the API key for an
-> IAM token at `https://iam.cloud.ibm.com/identity/token`, then call the
-> watsonx.ai text chat endpoint with a Granite instruct model. Check the
-> current endpoint, API version and model id against IBM's docs, and keep
-> them in one place so they're easy to change.
+> Add `docugate tour scan`. It never calls an AI provider directly, and it
+> never holds a provider key. It sends the app's code to DocuGate's hosted
+> API, which does the generation:
 >
-> The prompt must teach the model the exact tour format, and tell it to only
-> claim what it can see in the files: the real endpoint, the real component
-> file, and a `data-tour` target that exists (or a suggested one, marked as
-> such). After generating, run the tour checks from task 2 on the result.
-> Keep only stops that pass, and return the failures in a separate list so the
-> caller can show them.
+> 1. Collect the files that describe screens and data: routes, pages or
+>    screens, components, and API or fetch calls. Respect `.gitignore`, skip
+>    `node_modules`, build output and anything that looks like secrets
+>    (`.env*`, keys, credentials), and cap the total size.
+> 2. `POST` them to `${DOCUGATE_API_URL:-https://www.trydocugate.site}/api/tour/generate`
+>    with `Authorization: Bearer $DOCUGATE_TOKEN`, along with the routes that
+>    already have a tour file.
+> 3. The response is a list of tour files. Write only files that don't exist
+>    yet, and never overwrite the user's files. Then run the tour checks and
+>    print what was added and what failed.
 >
-> Then add a Vercel function to the demo, `examples/invoices/api/generate-tour.ts`,
-> that reads `WATSONX_API_KEY`, `WATSONX_PROJECT_ID` and `WATSONX_URL` from the
-> environment (never from the request), runs `generateTour` over the demo
-> app's own `src/` files and returns the tours plus a pass/fail count. Add a
-> **Generate tour with AI** button to the demo's `/customers` screen that
-> calls it and shows the result.
+> Add `--dry-run`, which prints what it would send and write without calling
+> the API, and clear errors for a missing token, 401 and 429. Put the request
+> and response types in `src/tour-api.ts` so the server side can match them.
+> Add tests with a fake server.
 >
-> Keys come only from env vars. Don't log them, and never send them to the
-> browser. Add unit tests for the parts that don't need the network
-> (building the prompt, parsing the model's reply, filtering by the checks).
->
-> Done when `npm test` passes and, with a real key in `.env`, the button
-> returns generated tours with most stops passing.
+> Done when `docugate tour scan --dry-run` in `examples/invoices` lists the
+> right files and no secrets.
 
-## Task 5: docs
+## Task 6: docs
 
-> Update `README.md` with a **Tours** section: what the tour is, the file
-> format, `docugate check` for tours, `docugate tour --export`, how to add
-> the pill, and how AI generation works (watsonx.ai, checked output, keys only
-> on the server). Match the existing README's tone. Add a short
-> `examples/invoices/README.md` explaining how to run the demo and deploy it
-> to Vercel with the three env vars. No em dashes.
+> Update `README.md` with a **Tours** section: what the tour is (a way to help
+> new developers understand an unfamiliar codebase faster), the file format,
+> `docugate tour`, the walkthrough and inspector, `docugate check` for tours,
+> and `docugate tour scan` (AI generation runs on DocuGate's hosted service,
+> so no keys are needed locally). Match the existing README's tone. Add a
+> short `examples/invoices/README.md` on running the demo. No em dashes.
 >
 > Done when a new developer could run the demo from the README alone.
