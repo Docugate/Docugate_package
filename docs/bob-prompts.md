@@ -1,6 +1,6 @@
 # Bob prompt pack
 
-Six tasks for Bob IDE. Each one is a separate Bob task, so each gets its own
+Five tasks for Bob IDE. Each one is a separate Bob task, so each gets its own
 session summary.
 
 ## Before you start
@@ -40,7 +40,7 @@ The demo app is **Ledgerly**, a small billing app in its own repo
 ([Docugate/docugate-demo](https://github.com/Docugate/docugate-demo)), with a
 React `frontend/` and a Hono `backend/`. Clone it next to this repo
 (`Documents/GitHub/docugate-demo`) and **open the demo in Bob for this task
-only.** Tasks 2 to 6 run in this repo.
+only.** Tasks 2 to 5 run in this repo.
 
 > Read this codebase: `frontend/src/` (screens, `api.ts`) and `backend/src/`
 > (routes and `billing.ts`). Write `.docugate/tour/invoice-detail.md` at the
@@ -103,10 +103,12 @@ only.** Tasks 2 to 6 run in this repo.
 > `../docugate-demo` passes, then warns after renaming `invoice-total` in
 > `frontend/src/screens/InvoiceDetail.tsx`.
 
-## Task 3: `docugate tour`, the local server (use Plan mode first)
+## Task 3: `docugate tour serve`, the local server (use Plan mode first)
 
-> Add a `tour` command to `src/cli.ts`, backed by `src/tour-server.ts`.
-> `docugate tour [--port 4178]` starts a Node `http` server (no framework)
+> `src/cli.ts` already has a `tour` command with an `init` subcommand
+> (`src/tour-init.ts`, which asks Bob Shell to write the first tour). Add a
+> `serve` subcommand next to it, backed by `src/tour-server.ts`.
+> `docugate tour serve [--port 4178]` starts a Node `http` server (no framework)
 > that only listens on `127.0.0.1`, only accepts requests from localhost
 > origins, and only reads and writes inside `.docugate/tour/`:
 >
@@ -125,7 +127,7 @@ only.** Tasks 2 to 6 run in this repo.
 >
 > Test the endpoints with the server on a random port. Done when `npm test`
 > passes and `curl "localhost:4178/tour?path=/invoices/inv_1004"`, run while
-> `docugate tour` runs in `../docugate-demo`, returns the stops from task 1.
+> `docugate tour serve` runs in `../docugate-demo`, returns the stops from task 1.
 
 ## Task 4: the pill and the inspector (use Plan mode first)
 
@@ -167,38 +169,13 @@ only.** Tasks 2 to 6 run in this repo.
 > `.docugate/tour/customers.md`, and the pill is gone when the server is
 > stopped.
 
-## Task 5: `docugate tour scan` (the client for DocuGate's AI)
-
-> Add `docugate tour scan`. It never calls an AI provider directly, and it
-> never holds a provider key. It sends the app's code to DocuGate's hosted
-> API, which does the generation:
->
-> 1. Collect the files that describe screens and data: routes, pages or
->    screens, components, and API or fetch calls. Respect `.gitignore`, skip
->    `node_modules`, build output and anything that looks like secrets
->    (`.env*`, keys, credentials), and cap the total size.
-> 2. `POST` them to `${DOCUGATE_API_URL:-https://www.trydocugate.site}/api/tour/generate`
->    with `Authorization: Bearer $DOCUGATE_TOKEN`, along with the routes that
->    already have a tour file.
-> 3. The response is a list of tour files. Write only files that don't exist
->    yet, and never overwrite the user's files. Then run the tour checks and
->    print what was added and what failed.
->
-> Add `--dry-run`, which prints what it would send and write without calling
-> the API, and clear errors for a missing token, 401 and 429. Put the request
-> and response types in `src/tour-api.ts` so the server side can match them.
-> Add tests with a fake server.
->
-> Done when `docugate tour scan --dry-run` in `../docugate-demo` lists the
-> right files and no secrets.
-
-## Task 6: docs
+## Task 5: docs
 
 > Update `README.md` with a **Tours** section: what the tour is (a way to help
 > new developers understand an unfamiliar codebase faster), the file format,
-> `docugate tour`, the walkthrough and inspector, `docugate check` for tours,
-> and `docugate tour scan` (AI generation runs on DocuGate's hosted service,
-> so no keys are needed locally). Link the demo app,
+> `docugate tour init` (Bob Shell writes the first tour from the code; the
+> user's files are never overwritten), `docugate tour serve`, the walkthrough
+> and inspector, and `docugate check` for tours. Link the demo app,
 > https://github.com/Docugate/docugate-demo. Match the existing README's tone.
 > No em dashes.
 >

@@ -36,8 +36,11 @@ September 25 to 27, 2026). To be clear about what was built when:
 * **Before the event:** the CLI above (`init`, `check`, `openapi`), moved here
   from DocuGate's private repository with its history.
 * **During the event, with IBM Bob:** the UI tour: the `.docugate/tour/` format,
-  `docugate tour`, tour checks in `docugate check`, the pill with its inspector,
-  and `docugate tour scan`. Screenshots of the Bob sessions are in `bob_sessions/`.
+  `docugate tour serve`, tour checks in `docugate check`, and the pill with its
+  inspector. Screenshots of the Bob sessions are in `bob_sessions/`.
+* **During the event, without Bob:** `docugate tour init`, which installs the
+  Tour Writer mode and runs IBM Bob through Bob Shell to write an app's first
+  tour, and the demo app, [Ledgerly](https://github.com/Docugate/docugate-demo).
 
 ## Several repositories in one space
 

@@ -5,6 +5,7 @@ import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
 import { init } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
+import { BobMissingError, tourInit } from './tour-init.js'
 
 const SITE = 'https://www.trydocugate.site'
 
@@ -17,6 +18,7 @@ Commands
   init        Set up this repository for DocuGate
   check       Check the docs the way DocuGate will read them
   openapi     Prepare an OpenAPI spec for DocuGate's API reference
+  tour init   Write the first tour of this app with IBM Bob
 
 init
   --dir <folder>       Docs folder (default: docs)
@@ -34,6 +36,10 @@ openapi
   --redact <name>      Remove a property from every schema and example; repeatable
   --check              Fail if the file is out of date, instead of writing it
 
+tour init
+  --max-cost <n>       Most Bobcoins the run may spend (default: 3)
+  --team-id <id>       Bob team to run under, for API keys that need one
+
 Run it from the root of your repository.
 ${SITE}
 `
@@ -45,14 +51,15 @@ const yellow = (t: string) => paint(33, t)
 const green = (t: string) => paint(32, t)
 const dim = (t: string) => paint(2, t)
 
-type Args = { command?: string; flags: Map<string, string[]>; bools: Set<string> }
+type Args = { command?: string; sub?: string; flags: Map<string, string[]>; bools: Set<string> }
 
-const VALUE_FLAGS = new Set(['dir', 'title', 'from', 'out', 'include', 'exclude', 'redact'])
+const VALUE_FLAGS = new Set(['dir', 'title', 'from', 'out', 'include', 'exclude', 'redact', 'max-cost', 'team-id'])
 
 function parse(argv: string[]): Args {
   const flags = new Map<string, string[]>()
   const bools = new Set<string>()
   let command: string | undefined
+  let sub: string | undefined
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -66,9 +73,10 @@ function parse(argv: string[]): Args {
         flags.set(name, [...(flags.get(name) ?? []), value])
       } else bools.add(name)
     } else if (!command) command = arg
+    else if (command === 'tour' && !sub) sub = arg
     else fail(`Unexpected argument "${arg}".`)
   }
-  return { command, flags, bools }
+  return { command, sub, flags, bools }
 }
 
 function fail(message: string): never {
@@ -159,6 +167,44 @@ async function main() {
 
       writeOpenApi(root, output, result.text)
       console.log(`${green('wrote')}  ${output} ${dim(`(${summary})`)}`)
+      return
+    }
+
+    case 'tour': {
+      if (args.sub !== 'init') fail(args.sub ? `Unknown tour command "${args.sub}".` : 'Say which: docugate tour init.')
+      console.log(`${dim('Bob is reading your code and writing the tour. This takes a minute or two.')}`)
+      let result
+      try {
+        result = tourInit(root, { maxCost: one('max-cost'), teamId: one('team-id') })
+      } catch (error) {
+        if (!(error instanceof BobMissingError)) throw error
+        console.error(
+          `${red('error')} Bob Shell is not installed, and tours are written by IBM Bob.
+` +
+            `Install it (Node 24 or later), sign in, then run this again:
+` +
+            `  Windows      powershell -c "irm -Uri https://bob.ibm.com/download/bobshell.ps1 | iex"
+` +
+            `  macOS/Linux  curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash
+` +
+            dim('https://bob.ibm.com/docs/shell/getting-started/install-and-setup'),
+        )
+        process.exit(2)
+      }
+      for (const f of result.setup) console.log(`  ${green('created')}  ${f}`)
+      for (const f of result.added) console.log(`  ${green('added')}    ${f}`)
+      for (const f of result.restored) console.log(`  ${yellow('kept')}     ${f} ${dim('(Bob changed it; your version was put back)')}`)
+      if (!result.added.length) console.log(`  ${dim('No new screens: every screen Bob found already has a tour file.')}`)
+
+      const stats = result.stats
+      const parts = [
+        result.mode === 'agent' ? 'agent mode' : 'Tour Writer mode',
+        stats?.durationMs !== undefined ? `${Math.round(stats.durationMs / 1000)}s` : '',
+        stats?.cost !== undefined ? `${stats.cost} Bobcoins` : '',
+      ].filter(Boolean)
+      console.log(`
+${dim(`Bob: ${parts.join(', ')}`)}`)
+      console.log('Next: read the new files, fix anything Bob got wrong, and commit them. They are yours now.')
       return
     }
 
