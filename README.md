@@ -27,6 +27,18 @@ without installing anything. Both work with pnpm, yarn and bun too.
 Requires Node 18.17 or later. Run every command from the root of your
 repository.
 
+
+## IBM Bob 2.0 hackathon
+
+This repository is DocuGate's entry to the IBM Bob 2.0 hackathon (lablab.ai,
+September 25 to 27, 2026). To be clear about what was built when:
+
+* **Before the event:** the CLI above (`init`, `check`, `openapi`), moved here
+  from DocuGate's private repository with its history.
+* **During the event, with IBM Bob:** the UI tour: the `.docugate/tour/` format,
+  `docugate tour`, tour checks in `docugate check`, the pill, and the Tour Writer
+  mode. Screenshots of the Bob sessions are in `docs/bob-sessions/`.
+
 ## Several repositories in one space
 
 A space can merge the docs from a frontend, a backend and a mobile app into one

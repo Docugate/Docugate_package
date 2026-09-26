@@ -29,6 +29,11 @@
     "cli"
   ],
   "homepage": "https://www.trydocugate.site",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Docugate/Docugate_package.git"
+  },
+  "bugs": "https://github.com/Docugate/Docugate_package/issues",
   "license": "MIT",
   "dependencies": {
     "yaml": "^2.9.1"
