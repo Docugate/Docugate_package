@@ -55,50 +55,58 @@ function isJsx(rel: string): boolean {
   return rel.endsWith('.tsx') || rel.endsWith('.jsx')
 }
 
-function makeSnippet(port: number, jsx: boolean): string {
-  if (jsx) {
-    const url = `http://localhost:${port}/pill.js`
-    return (
-      `\n      ${JSX_OPEN}\n` +
-      `      {process.env.NODE_ENV === 'development' && <script src="${url}" async />}\n` +
-      `      ${JSX_CLOSE}`
-    )
-  }
+/** The snippet as lines, without indentation: the file it lands in decides that. */
+function makeSnippet(port: number, jsx: boolean): string[] {
   const url = `http://localhost:${port}/pill.js`
-  return (
-    `\n  ${HTML_OPEN}\n` +
-    `  <script>if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){` +
-    `var s=document.createElement('script');s.src='${url}';document.head.appendChild(s)}</script>\n` +
-    `  ${HTML_CLOSE}`
-  )
-}
-
-function insertSnippet(text: string, snippet: string, jsx: boolean): string {
-  // Find the last </body> tag and insert immediately before it.
-  const tag = '</body>'
-  const idx = text.lastIndexOf(tag)
-  if (idx !== -1) {
-    return text.slice(0, idx) + snippet + '\n' + text.slice(idx)
-  }
   if (jsx) {
-    // _document.tsx may close with </html> instead of </body>
-    const htmlIdx = text.lastIndexOf('</html>')
-    if (htmlIdx !== -1) {
-      return text.slice(0, htmlIdx) + snippet + '\n' + text.slice(htmlIdx)
-    }
+    return [JSX_OPEN, `{process.env.NODE_ENV === 'development' && <script src="${url}" async />}`, JSX_CLOSE]
   }
-  // Graceful fallback: append to end of file.
-  return text + snippet + '\n'
+  return [
+    HTML_OPEN,
+    `<script>if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){` +
+      `var s=document.createElement('script');s.src='${url}';document.head.appendChild(s)}</script>`,
+    HTML_CLOSE,
+  ]
 }
 
+/**
+ * Inserts the snippet on its own lines just above the closing tag, indented one
+ * step deeper than it and with the file's own line endings, so the diff a
+ * developer reviews is three clean added lines.
+ */
+function insertSnippet(text: string, lines: string[], jsx: boolean): string {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  let idx = text.lastIndexOf('</body>')
+  // _document.tsx may close with </html> instead of </body>
+  if (idx === -1 && jsx) idx = text.lastIndexOf('</html>')
+  if (idx === -1) {
+    // Graceful fallback: append to end of file.
+    const end = text.endsWith('\n') ? '' : eol
+    return text + end + lines.join(eol) + eol
+  }
+
+  const lineStart = text.lastIndexOf('\n', idx - 1) + 1
+  const indent = text.slice(lineStart, idx)
+  if (/^[ \t]*$/.test(indent)) {
+    const block = lines.map((line) => `${indent}  ${line}`).join(eol) + eol
+    return text.slice(0, lineStart) + block + text.slice(lineStart)
+  }
+  // The tag shares its line with other markup: keep it on that line.
+  return text.slice(0, idx) + lines.join(eol) + eol + text.slice(idx)
+}
+
+/** Removes the whole marked block, including the lines it sat on. */
 function removeSnippet(text: string, open: string, close: string): string {
   const start = text.indexOf(open)
   if (start === -1) return text
   const end = text.indexOf(close, start)
   if (end === -1) return text
-  // Also eat the leading newline before the open marker if present.
-  const before = start > 0 && text[start - 1] === '\n' ? start - 1 : start
-  return text.slice(0, before) + text.slice(end + close.length)
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1
+  const from = /^[ \t]*$/.test(text.slice(lineStart, start)) ? lineStart : start
+  let to = end + close.length
+  if (text[to] === '\r') to++
+  if (text[to] === '\n') to++
+  return text.slice(0, from) + text.slice(to)
 }
 
 /**
