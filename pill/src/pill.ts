@@ -99,18 +99,24 @@ function getServerBase(): string | null {
 // Fetch current tour from server or window.DOCUGATE_TOUR
 // ---------------------------------------------------------------------------
 
-async function fetchTour(base: string): Promise<Tour | null> {
+/**
+ * The current page's tour, and whether the tour server answered at all. The
+ * two are different: a page with no tour yet still gets the pill, so its first
+ * stop can be added from the inspector. Only a silent server hides it.
+ */
+async function fetchTour(base: string): Promise<{ alive: boolean; tour: Tour | null }> {
   const pathname = location.pathname
   if (window.DOCUGATE_TOUR) {
     const match = window.DOCUGATE_TOUR.find((t) => matchRoute(t.route, pathname))
-    return match ?? null
+    return { alive: true, tour: match ?? null }
   }
   try {
     const res = await fetch(`${base}/tour?path=${encodeURIComponent(pathname)}`, { signal: AbortSignal.timeout(3000) })
-    if (!res.ok) return null
-    return (await res.json()) as Tour
+    if (res.status === 404) return { alive: true, tour: null }
+    if (!res.ok) return { alive: false, tour: null }
+    return { alive: true, tour: (await res.json()) as Tour }
   } catch {
-    return null
+    return { alive: false, tour: null }
   }
 }
 
@@ -181,6 +187,7 @@ const STYLES = `
 .menu-item:focus-visible { outline: 2px solid #4a90d9; outline-offset: -2px; }
 .menu-item + .menu-item { border-top: 1px solid #2a2a2a; }
 .menu-item.active { color: #4a90d9; }
+.menu-item:disabled { color: #777; cursor: default; background: none; }
 
 /* ── overlay / backdrop ── */
 .overlay {
@@ -490,6 +497,7 @@ class DocugatePill {
   private host: HTMLElement
   private base: string
   private tour: Tour | null = null
+  private alive = false
   private menuOpen = false
   private walkthroughActive = false
   private inspectorActive = false
@@ -535,18 +543,22 @@ class DocugatePill {
   }
 
   private async init(): Promise<void> {
-    this.tour = await fetchTour(this.base)
-    if (!this.tour && !this.isStaticMode) {
-      // Server didn't respond — draw nothing
-      return
-    }
+    await this.load()
+    // Server didn't respond: draw nothing.
+    if (!this.alive) return
     this.render()
+  }
+
+  private async load(): Promise<void> {
+    const { alive, tour } = await fetchTour(this.base)
+    this.alive = alive
+    this.tour = tour
   }
 
   private render(): void {
     this.removePill()
 
-    if (!this.tour) return
+    if (!this.alive) return
 
     const btn = document.createElement('button')
     btn.className = 'pill-btn'
@@ -584,7 +596,9 @@ class DocugatePill {
 
     const walkBtn = document.createElement('button')
     walkBtn.className = 'menu-item'
-    walkBtn.textContent = 'Walkthrough'
+    const stops = this.tour?.stops.length ?? 0
+    walkBtn.textContent = stops ? 'Walkthrough' : 'No tour on this page yet'
+    walkBtn.disabled = !stops
     walkBtn.setAttribute('role', 'menuitem')
     walkBtn.addEventListener('click', () => { this.closeMenu(); this.startWalkthrough() })
 
@@ -1020,12 +1034,13 @@ class DocugatePill {
   }
 
   private async saveStop(stop: TourStop): Promise<void> {
-    if (!this.tour) return
+    // A page with no tour yet starts one at its own path.
+    const route = this.tour?.route ?? location.pathname
     try {
       await fetch(`${this.base}/stop`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route: this.tour.route, stop }),
+        body: JSON.stringify({ route, stop }),
       })
     } catch {
       // best-effort
@@ -1065,7 +1080,7 @@ class DocugatePill {
   }
 
   private async reload(): Promise<void> {
-    this.tour = await fetchTour(this.base)
+    await this.load()
     if (this.walkthroughActive) this.stopWalkthrough()
     if (this.inspectorActive) this.stopInspector()
     this.render()
