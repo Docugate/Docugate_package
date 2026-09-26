@@ -3,6 +3,7 @@ import { join, relative, sep } from 'node:path'
 import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
 import { MAX_FILES, firstHeading, landingPath, pathToSlug, resolveRelativeLink } from './rules.js'
+import { loadTours } from './tour.js'
 
 export type CheckResult = {
   docsDir: string
@@ -151,5 +152,159 @@ export function check(root: string, dirOverride?: string): CheckResult {
     }
   }
 
+  warnings.push(...checkTours(root))
+
   return { docsDir, pages: pages.length, errors, warnings }
+}
+
+/**
+ * Turn a data-tour route path (with :param segments) into a regex that matches
+ * the same path with any token in :param positions.
+ *
+ * The regex is intentionally loose so it matches template literals, Express
+ * route strings, Hono route strings, etc.
+ */
+function routeToRegex(routePath: string): RegExp {
+  // Split on :param segments, escape the literal parts, join with a wildcard
+  const parts = routePath.split(/:[\w]+/)
+  const escaped = parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(escaped.join('[^/\'"` ]+'))
+}
+
+/** Extract bare path from a data field like `GET /api/invoices/:id → total`. */
+function parseDataPath(data: string): string | null {
+  const m = data.match(/\w+\s+(\/[^\s→]+)/)
+  return m ? m[1].trim() : null
+}
+
+/** Resolve a single-level import path inside a source file. */
+function resolveImport(from: string, spec: string, root: string): string | null {
+  if (!spec.startsWith('.')) return null
+  const dir = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : ''
+  const base = join(root, dir, spec)
+  for (const ext of ['.ts', '.tsx', '.js', '.jsx', '']) {
+    const full = base + ext
+    if (existsSync(full)) return full
+    // index file
+    const index = join(base, 'index') + ext
+    if (existsSync(index)) return index
+  }
+  return null
+}
+
+/** All direct import specifiers found in a file. */
+function importsIn(text: string): string[] {
+  const specs: string[] = []
+  for (const m of text.matchAll(/^import\s+[^'"]*['"]([^'"]+)['"]/gm)) specs.push(m[1])
+  return specs
+}
+
+/**
+ * Run tour checks against every tour file found under `.docugate/tour/`.
+ * Issues are warnings: the docs still publish; the tour may just be wrong.
+ */
+function checkTours(root: string): Issue[] {
+  const warnings: Issue[] = []
+  let tours
+  try {
+    tours = loadTours(root)
+  } catch (err) {
+    warnings.push({ message: `tour: ${(err as Error).message}` })
+    return warnings
+  }
+  if (tours.length === 0) return warnings
+
+  for (const tour of tours) {
+    const label = tour.file ?? `tour/${tour.route}`
+
+    // required fields are validated by parseTourFile (throws); stops that
+    // survive parsing already have target and code.
+
+    // no two stops on a screen share a target
+    const seen = new Map<string, string>()
+    for (const stop of tour.stops) {
+      const prev = seen.get(stop.target)
+      if (prev) {
+        warnings.push({
+          file: label,
+          message: `stops "${prev}" and "${stop.heading}" share the same target ${stop.target}.`,
+        })
+      } else {
+        seen.set(stop.target, stop.heading)
+      }
+    }
+
+    for (const stop of tour.stops) {
+      const codeAbs = join(root, stop.code)
+
+      // code file must exist
+      if (!existsSync(codeAbs)) {
+        warnings.push({ file: label, message: `stop "${stop.heading}": code file "${stop.code}" does not exist.` })
+        continue
+      }
+
+      // source file must exist if given
+      if (stop.source) {
+        const sourceAbs = join(root, stop.source)
+        if (!existsSync(sourceAbs)) {
+          warnings.push({ file: label, message: `stop "${stop.heading}": source file "${stop.source}" does not exist.` })
+        }
+      }
+
+      const codeText = readFileSync(codeAbs, 'utf8')
+
+      // code file contains the data-tour value from target.
+      // Accepts either the full attribute (data-tour="value") or the value as
+      // any quoted string literal ("value" / 'value'), so that passing the
+      // value through a prop like tour="invoice-status" also passes the check.
+      // A renamed value (e.g. "invoice-total-RENAMED") must still warn.
+      const tourValueMatch = stop.target.match(/data-tour=["']([^"']+)["']/)
+      if (tourValueMatch) {
+        const tourValue = tourValueMatch[1]
+        const esc = tourValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const exactPattern = new RegExp(`["']${esc}["']`)
+        if (!exactPattern.test(codeText)) {
+          warnings.push({
+            file: label,
+            message: `stop "${stop.heading}": "${stop.code}" does not contain data-tour value "${tourValue}".`,
+          })
+        }
+      }
+
+      // code file (or a file it imports, one level deep) contains the endpoint path from data
+      if (stop.data) {
+        const endpointPath = parseDataPath(stop.data)
+        if (endpointPath) {
+          // build a regex that matches the path with :param as wildcard
+          const pathRegex = routeToRegex(endpointPath)
+
+          const filesForEndpoint: string[] = [codeAbs]
+          for (const spec of importsIn(codeText)) {
+            const resolved = resolveImport(stop.code, spec, root)
+            if (resolved) filesForEndpoint.push(resolved)
+          }
+
+          const found = filesForEndpoint.some((f) => {
+            try {
+              const t = readFileSync(f, 'utf8')
+              // Check for literal path or a path where :param is present as /:id etc.
+              // We look for any substring matching the regex pattern by scanning lines
+              return t.split('\n').some((line) => pathRegex.test(line))
+            } catch {
+              return false
+            }
+          })
+
+          if (!found) {
+            warnings.push({
+              file: label,
+              message: `stop "${stop.heading}": endpoint "${endpointPath}" not found in "${stop.code}" or its imports.`,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return warnings
 }
