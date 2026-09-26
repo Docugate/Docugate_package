@@ -8,7 +8,7 @@
   },
   "files": [
     "dist",
-    "pill/dist",
+    "pill/dist/pill.js",
     "README.md",
     "LICENSE"
   ],
