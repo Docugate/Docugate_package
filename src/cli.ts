@@ -3,9 +3,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { check } from './check.js'
 import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
-import { init } from './init.js'
+import { initFlow } from './init.js'
+import type { Role } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
 import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
+import { tourInstall, hasPillSnippet, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import { loadTours } from './tour.js'
 import { startTourServer } from './tour-server.js'
 
@@ -17,16 +19,19 @@ Usage
   docugate <command> [options]
 
 Commands
-  init        Set up this repository for DocuGate
-  check       Check the docs the way DocuGate will read them
-  openapi     Prepare an OpenAPI spec for DocuGate's API reference
-  tour init   Write the first tour of this app with IBM Bob
-  tour serve  Start a local server that serves tour data for the pill
-  tour export Write every tour screen to a single JSON file
+  init              Set up this repository for DocuGate (interactive)
+  check             Check the docs the way DocuGate will read them
+  openapi           Prepare an OpenAPI spec for DocuGate's API reference
+  tour init         Write the first tour of this app with IBM Bob
+  tour install      Add the pill loader to your app
+  tour serve        Start a local server that serves tour data for the pill
+  tour export       Write every tour screen to a single JSON file
 
 init
   --dir <folder>       Docs folder (default: docs)
   --title <text>       Space title (default: this folder's name)
+  --role <role>        Repository role: frontend, backend, or both
+  --yes                Accept every default without asking
 
 check
   --dir <folder>       Check this folder instead of docugate.json's docsDir
@@ -43,6 +48,10 @@ openapi
 tour init
   --max-cost <n>       Most Bobcoins the run may spend (default: 3)
   --team-id <id>       Bob team to run under, for API keys that need one
+
+tour install
+  --port <n>           Port the pill server listens on (default: 4178)
+  --remove             Remove the pill snippet instead of adding it
 
 tour serve
   --port <n>           Port to listen on (default: 4178)
@@ -63,7 +72,7 @@ const dim = (t: string) => paint(2, t)
 
 type Args = { command?: string; sub?: string; sub2?: string; flags: Map<string, string[]>; bools: Set<string> }
 
-const VALUE_FLAGS = new Set(['dir', 'title', 'from', 'out', 'include', 'exclude', 'redact', 'max-cost', 'team-id', 'port'])
+const VALUE_FLAGS = new Set(['dir', 'title', 'role', 'from', 'out', 'include', 'exclude', 'redact', 'max-cost', 'team-id', 'port'])
 
 function parse(argv: string[]): Args {
   const flags = new Map<string, string[]>()
@@ -124,13 +133,17 @@ async function main() {
 
   switch (args.command) {
     case 'init': {
-      const result = init(root, { dir: one('dir'), title: one('title') })
-      for (const f of result.created) console.log(`  ${green('created')}  ${f}`)
-      for (const f of result.kept) console.log(`  ${dim('kept')}     ${f}`)
-      console.log(
-        `\nNext: commit and push, then publish the space at ${SITE}/dashboard/new` +
-          `\nand pick "${result.docsDir}" as the docs folder.`,
-      )
+      const roleFlag = one('role') as Role | undefined
+      if (roleFlag && !['frontend', 'backend', 'both'].includes(roleFlag)) {
+        fail(`--role must be frontend, backend, or both.`)
+      }
+      await initFlow(root, {
+        dir: one('dir'),
+        title: one('title'),
+        role: roleFlag,
+        yes: args.bools.has('yes'),
+        port: one('port') !== undefined ? parseInt(one('port')!, 10) : undefined,
+      })
       return
     }
 
@@ -184,6 +197,25 @@ async function main() {
 
     case 'tour': {
       switch (args.sub) {
+        case 'install': {
+          const port = parseInt(one('port') ?? String(DEFAULT_PORT), 10)
+          const remove = args.bools.has('remove')
+          const result = tourInstall(root, { port, remove })
+          if (result.target === null) {
+            console.log(`  ${yellow('not found')}  No supported HTML or layout file found.`)
+            console.log(`  Paste this into your app's HTML during development:`)
+            console.log(`    ${pillSnippetLine(port)}`)
+          } else if (result.action === 'inserted') {
+            console.log(`  ${green('installed')}  ${result.target}`)
+          } else if (result.action === 'removed') {
+            console.log(`  ${green('removed')}   ${result.target}`)
+          } else {
+            // already / no-op
+            console.log(`  ${dim('unchanged')}  ${result.target}`)
+          }
+          return
+        }
+
         case 'init': {
           console.log(`${dim('Bob is reading your code and writing the tour. This takes a minute or two.')}`)
           let result
@@ -249,8 +281,9 @@ ${dim(`Bob: ${parts.join(', ')}`)}`)
           const screens = loadTours(root)
           console.log(`${green('Tour server')}  ${url}`)
           console.log(`${plural(screens.length, 'screen')} loaded from .docugate/tour/`)
-          console.log(`\nPaste into your app's HTML during development:`)
-          console.log(`  <script src="${url}/pill.js"></script>`)
+          if (!hasPillSnippet(root)) {
+            console.log(`${dim('Hint: run')} ${green('docugate tour install')} ${dim('to add the pill to your app automatically.')}`)
+          }
           // Keep the process alive; Ctrl-C will stop it.
           process.on('SIGINT', () => { server.close(); process.exit(0) })
           process.on('SIGTERM', () => { server.close(); process.exit(0) })
@@ -269,7 +302,7 @@ ${dim(`Bob: ${parts.join(', ')}`)}`)
         }
 
         default:
-          fail(args.sub ? `Unknown tour command "${args.sub}".` : 'Say which: docugate tour init.')
+          fail(args.sub ? `Unknown tour command "${args.sub}".` : 'Say which: docugate tour init, tour install, or tour serve.')
       }
     }
 

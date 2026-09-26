@@ -64,6 +64,7 @@ export function firstHeading(content: string): string | null {
 export type DocugateConfig = {
   docsDir?: string
   title?: string
+  role?: 'frontend' | 'backend' | 'both'
   sidebar?: string[]
   api?: {
     generate?: {
@@ -76,4 +77,4 @@ export type DocugateConfig = {
   }
 }
 
-export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'sidebar', 'api'])
+export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'role', 'sidebar', 'api'])
