@@ -183,3 +183,9 @@ test('nearestCorner: the exact centre counts as bottom-right', () => {
   const { nearestCorner } = pillModule
   assert.equal(nearestCorner(960, 540, 1920, 1080), 'bottom-right')
 })
+
+test('tourValue reads the data-tour value out of a selector', () => {
+  const { tourValue } = pillModule
+  assert.equal(tourValue('[data-tour="invoice-total"]'), 'invoice-total')
+  assert.equal(tourValue('.total'), undefined)
+})

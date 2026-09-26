@@ -409,3 +409,69 @@ test('docugate tour rejects unknown subcommand', () => {
   assert.equal(result.status, 2)
   assert.match(result.stderr, /Unknown tour command "nope"/)
 })
+
+// ---------------------------------------------------------------------------
+// Editing from the browser: preflight, corrections, removal, open in editor
+// ---------------------------------------------------------------------------
+
+test('OPTIONS answers the browser preflight so the pill can save', async () => {
+  const root = tempTourCheckRepo()
+  const server = await startServer(root)
+  after(() => server.close())
+  const res = await fetch(`http://localhost:${server.port}/stop`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'PUT' },
+  })
+  assert.equal(res.status, 204)
+  assert.match(res.headers.get('access-control-allow-methods'), /PUT/)
+  assert.match(res.headers.get('access-control-allow-methods'), /DELETE/)
+})
+
+test('PUT /stop with previousTarget corrects a stop instead of adding a second one', async () => {
+  const root = tempTourCheckRepo()
+  const server = await startServer(root)
+  after(() => server.close())
+  const stop = { heading: 'Total', target: '[data-tour="grand-total"]', code: 'frontend/src/screens/InvoiceDetail.tsx', prose: 'Fixed.' }
+  const res = await put(server.port, '/stop', { route: '/invoices/:id', stop, previousTarget: '[data-tour="invoice-total"]' })
+  assert.equal(res.status, 200)
+  const text = readFileSync(join(root, '.docugate', 'tour', 'invoice-detail.md'), 'utf8')
+  assert.ok(text.includes('grand-total'))
+  assert.ok(!text.includes('[data-tour="invoice-total"]'), 'the old stop is replaced, not kept')
+  assert.equal(text.match(/^## Total$/gm).length, 1)
+})
+
+test('DELETE /stop removes one stop and keeps the others', async () => {
+  const root = tempTourCheckRepo()
+  const server = await startServer(root)
+  after(() => server.close())
+  const res = await fetch(`http://localhost:${server.port}/stop`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ route: '/invoices/:id', target: '[data-tour="invoice-total"]' }),
+  })
+  assert.equal(res.status, 200)
+  const text = readFileSync(join(root, '.docugate', 'tour', 'invoice-detail.md'), 'utf8')
+  assert.ok(!text.includes('invoice-total'))
+  assert.ok(text.includes('Mark as paid'))
+})
+
+test('POST /open refuses files outside the repository', async () => {
+  const root = tempTourCheckRepo()
+  const server = await startServer(root)
+  after(() => server.close())
+  const res = await fetch(`http://localhost:${server.port}/open`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: '../../etc/passwd' }),
+  })
+  assert.equal(res.status, 404)
+})
+
+test('lineOf finds the element, and editorCommand follows the editor', async () => {
+  const { lineOf, editorCommand } = await import('../dist/tour-server.js')
+  assert.equal(lineOf('a\nb data-tour="x"\nc', 'data-tour="x"'), 2)
+  assert.equal(lineOf('a\nb', 'missing'), 1)
+  assert.equal(editorCommand({ DOCUGATE_EDITOR: 'webstorm' }), 'webstorm')
+  assert.equal(editorCommand({ VSCODE_GIT_ASKPASS_NODE: 'C:/Program Files/cursor/Cursor.exe' }), 'cursor')
+  assert.equal(editorCommand({}), 'code')
+})

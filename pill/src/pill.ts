@@ -18,6 +18,8 @@ interface TourStop {
 interface Tour {
   route: string
   title: string
+  /** The tour file this screen lives in, as the server reports it. */
+  file?: string
   stops: TourStop[]
 }
 
@@ -347,6 +349,45 @@ kbd {
   padding: 8px 10px;
 }
 .add-form-warn code { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; color: #F4C43F; }
+.insp-popup { width: 360px; }
+.panel-section { margin: 4px 0 6px; font-size: 11px; color: #8f8f8f; letter-spacing: 0.02em; }
+.panel-hint { margin: 0 0 12px; font-size: 12.5px; color: #a1a1a1; }
+.panel-file { margin-right: auto; font: 11px ui-monospace, "Cascadia Mono", Menlo, monospace; color: #6e6e6e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.panel-error { margin: 10px 0 0; font-size: 12px; color: #ff9b8a; }
+.file-link { all: unset; cursor: pointer; font: inherit; color: #ededed; border-bottom: 1px dashed rgba(244, 196, 63, 0.55); overflow-wrap: anywhere; }
+.file-link:hover, .file-link:focus-visible { color: #F4C43F; border-bottom-style: solid; }
+.panel-form label { display: block; font-size: 11.5px; color: #a1a1a1; margin: 10px 0 4px; }
+.panel-form label:first-of-type { margin-top: 0; }
+.panel-form input, .panel-form textarea {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: #ededed;
+  font: 12.5px/1.4 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  padding: 7px 9px;
+  resize: vertical;
+}
+.panel-form textarea { min-height: 72px; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+.panel-form input::placeholder, .panel-form textarea::placeholder { color: #555; font-style: italic; }
+.panel-form input:focus, .panel-form textarea:focus { outline: none; border-color: #F4C43F; box-shadow: 0 0 0 3px rgba(244, 196, 63, 0.18); }
+.panel-form .insp-popup-actions { margin-top: 14px; }
+.wt-btn.ghost { border-color: transparent; background: none; color: #a1a1a1; }
+.wt-btn.ghost:hover { color: #ededed; background: rgba(255, 255, 255, 0.07); }
+.wt-btn.danger { border-color: transparent; background: none; color: #ff9b8a; }
+.wt-btn.danger:hover { background: rgba(255, 110, 90, 0.12); }
+.toast {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  animation: pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
 .add-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 14px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -476,6 +517,11 @@ function moveHighlight(el: HTMLElement, rect: DOMRect): void {
 // Text helpers for cards
 // ---------------------------------------------------------------------------
 
+/** The data-tour value inside a selector like [data-tour="invoice-total"], if any. */
+export function tourValue(selector: string): string | undefined {
+  return selector.match(/data-tour=["']([^"']+)["']/)?.[1]
+}
+
 /** Lets a long path wrap after its slashes rather than in the middle of a name. */
 function breakable(text: string): string {
   return text.replace(/\//g, '/\u200b')
@@ -552,6 +598,8 @@ class DocugatePill {
   private wtCard: HTMLElement | null = null
   private inspPopup: HTMLElement | null = null
   private addForm: HTMLElement | null = null
+  private inspEl: HTMLElement | null = null
+  private inspectedPath = location.pathname
   private highlightEl: HTMLElement | null = null
   private evtSource: EventSource | null = null
   private boundHandleKey: (e: KeyboardEvent) => void
@@ -883,6 +931,18 @@ class DocugatePill {
     dots.innerHTML = this.wtStops.map((_, i) => `<i class="${i === this.wtIndex ? 'on' : ''}"></i>`).join('')
     nav.appendChild(dots)
 
+    if (!this.isStaticMode) {
+      const edit = document.createElement('button')
+      edit.className = 'wt-btn ghost'
+      edit.textContent = 'Edit'
+      edit.addEventListener('click', () => {
+        const el = document.querySelector(stop.target) as HTMLElement | null
+        this.stopWalkthrough()
+        if (el) this.showInspPopup(el, stop, true)
+      })
+      nav.appendChild(edit)
+    }
+
     if (this.wtIndex > 0) {
       const back = document.createElement('button')
       back.className = 'wt-btn'
@@ -1022,201 +1082,336 @@ class DocugatePill {
     return null
   }
 
-  private showInspPopup(el: HTMLElement, stop: TourStop): void {
-    this.closeInspPopup()
-    const popup = document.createElement('div')
-    popup.className = 'insp-popup surface'
-    popup.setAttribute('role', 'dialog')
-    popup.setAttribute('aria-label', stop.heading)
+  // ── Stop panel: read a stop, or correct it, next to its element ──────────
 
+  /**
+   * One panel for everything about a stop. It opens reading (what this is and
+   * where its data comes from) and turns into a form in place when the person
+   * edits, so fixing something the AI got wrong never leaves the element.
+   * With no stop, it opens as the form for a new one.
+   */
+  private showInspPopup(el: HTMLElement, stop: TourStop | null, editing = false): void {
+    this.closeInspPopup()
+    const panel = document.createElement('div')
+    panel.className = 'insp-popup surface'
+    panel.setAttribute('role', 'dialog')
+    panel.setAttribute('aria-label', stop ? stop.heading : 'Add to tour')
+    this.shadow.appendChild(panel)
+    this.inspPopup = panel
+    this.inspEl = el
+    if (stop && !editing) this.fillView(panel, el, stop)
+    else this.fillForm(panel, el, stop)
+    this.placeNear(panel, el)
+  }
+
+  private fillView(panel: HTMLElement, el: HTMLElement, stop: TourStop): void {
+    panel.replaceChildren()
+    const stops = this.tour?.stops ?? []
+    const index = stops.findIndex((s) => s.target === stop.target)
+
+    const eyebrow = document.createElement('p')
+    eyebrow.className = 'wt-eyebrow'
+    eyebrow.textContent = `${this.tour?.title ?? 'Tour'}${index >= 0 ? ` · stop ${index + 1} of ${stops.length}` : ''}`
     const heading = document.createElement('h3')
     heading.className = 'insp-popup-heading'
     heading.textContent = stop.heading
-    popup.appendChild(heading)
+    panel.append(eyebrow, heading)
 
     if (stop.prose) {
       const prose = document.createElement('p')
       prose.className = 'insp-popup-prose'
       renderProse(prose, stop.prose)
-      popup.appendChild(prose)
+      panel.appendChild(prose)
     }
+
+    const section = document.createElement('p')
+    section.className = 'panel-section'
+    section.textContent = 'Where it comes from'
+    panel.appendChild(section)
 
     const grid = document.createElement('div')
     grid.className = 'wt-fields'
-
-    const rows: Array<{ label: string; value: string; isLink?: boolean }> = []
-    if (stop.data) rows.push({ label: 'Data', value: stop.data })
-    rows.push({ label: 'Code', value: stop.code })
-    if (stop.source) rows.push({ label: 'Source', value: stop.source })
-    if (stop.docs) rows.push({ label: 'Docs', value: stop.docs, isLink: true })
-
-    for (const r of rows) {
+    const find = tourValue(stop.target)
+    const row = (label: string, content: Node) => {
       const lbl = document.createElement('span')
       lbl.className = 'insp-popup-label'
-      lbl.textContent = r.label
+      lbl.textContent = label
       const val = document.createElement('span')
       val.className = 'insp-popup-val'
-      if (r.isLink && r.value.startsWith('http')) {
-        const a = document.createElement('a')
-        a.href = r.value
-        a.target = '_blank'
-        a.rel = 'noopener noreferrer'
-        a.textContent = breakable(r.value)
-        val.appendChild(a)
-      } else {
-        val.textContent = breakable(r.value)
-      }
+      val.appendChild(content)
       grid.append(lbl, val)
     }
-    popup.appendChild(grid)
-
-    if (!this.isStaticMode) {
-      const actions = document.createElement('div')
-      actions.className = 'insp-popup-actions'
-
-      const editBtn = document.createElement('button')
-      editBtn.className = 'wt-btn'
-      editBtn.textContent = 'Edit'
-      editBtn.addEventListener('click', () => {
-        this.closeInspPopup()
-        this.showAddForm(el, stop)
-      })
-      actions.appendChild(editBtn)
-
-      const closeBtn = document.createElement('button')
-      closeBtn.className = 'wt-btn primary'
-      closeBtn.textContent = 'Close'
-      closeBtn.addEventListener('click', () => this.closeInspPopup())
-      actions.appendChild(closeBtn)
-      popup.appendChild(actions)
-    } else {
-      const closeBtn = document.createElement('button')
-      closeBtn.className = 'wt-btn primary'
-      closeBtn.textContent = 'Close'
-      closeBtn.addEventListener('click', () => this.closeInspPopup())
-      const actions = document.createElement('div')
-      actions.className = 'insp-popup-actions'
-      actions.appendChild(closeBtn)
-      popup.appendChild(actions)
+    const fileLink = (path: string, findText?: string) => {
+      if (this.isStaticMode) return document.createTextNode(breakable(path))
+      const b = document.createElement('button')
+      b.className = 'file-link'
+      b.title = 'Open in your editor'
+      b.textContent = breakable(path)
+      b.addEventListener('click', () => this.openInEditor(path, findText))
+      return b
     }
+    if (stop.data) row('Data', document.createTextNode(stop.data))
+    row('Code', fileLink(stop.code, find))
+    if (stop.source) row('Source', fileLink(stop.source))
+    if (stop.docs && /^https?:\/\//.test(stop.docs)) {
+      const a = document.createElement('a')
+      a.href = stop.docs
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.textContent = breakable(stop.docs)
+      row('Docs', a)
+    }
+    panel.appendChild(grid)
 
-    // Position near element
-    const rect = el.getBoundingClientRect()
-    popup.style.top = `${Math.min(rect.bottom + 10, window.innerHeight - 200)}px`
-    popup.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 352))}px`
-
-    this.shadow.appendChild(popup)
-    this.inspPopup = popup
+    const actions = document.createElement('div')
+    actions.className = 'insp-popup-actions'
+    const where = document.createElement('span')
+    where.className = 'panel-file'
+    where.textContent = this.tour?.file ?? ''
+    actions.appendChild(where)
+    if (!this.isStaticMode) {
+      const edit = document.createElement('button')
+      edit.className = 'wt-btn'
+      edit.textContent = 'Edit'
+      edit.addEventListener('click', () => {
+        this.fillForm(panel, el, stop)
+        this.placeNear(panel, el)
+      })
+      actions.appendChild(edit)
+    }
+    const close = document.createElement('button')
+    close.className = 'wt-btn primary'
+    close.textContent = 'Close'
+    close.addEventListener('click', () => this.closeInspPopup())
+    actions.appendChild(close)
+    panel.appendChild(actions)
+    close.focus()
   }
 
-  private closeInspPopup(): void {
-    this.inspPopup?.remove()
-    this.inspPopup = null
-  }
-
-  // ── Add/Edit form ─────────────────────────────────────────────────────────
-
-  private showAddForm(el: HTMLElement, existing?: TourStop): void {
-    this.closeAddForm()
+  private fillForm(panel: HTMLElement, el: HTMLElement, existing: TourStop | null): void {
+    panel.replaceChildren()
+    panel.setAttribute('aria-label', existing ? `Edit ${existing.heading}` : 'Add to tour')
     const { selector, needsAttribute } = suggestSelector(el)
 
-    const form = document.createElement('div')
-    form.className = 'add-form surface'
-    form.setAttribute('role', 'dialog')
-    form.setAttribute('aria-modal', 'true')
-    form.setAttribute('aria-label', existing ? 'Edit stop' : 'Add stop')
-
     const title = document.createElement('h3')
-    title.className = 'add-form-title'
-    title.textContent = existing ? 'Edit stop' : 'Add to tour'
-    form.appendChild(title)
+    title.className = 'insp-popup-heading'
+    title.textContent = existing ? 'Edit this stop' : 'Add to tour'
+    const hint = document.createElement('p')
+    hint.className = 'panel-hint'
+    hint.textContent = existing
+      ? 'Correct anything that is wrong. Only this stop changes in the tour file.'
+      : 'Say what this element is and where its data comes from.'
+    panel.append(title, hint)
 
-    const fields: Array<{ id: string; label: string; value: string; multi?: boolean }> = [
-      { id: 'f-heading', label: 'Heading', value: existing?.heading ?? '' },
-      { id: 'f-target', label: 'Target (selector)', value: existing?.target ?? selector },
-      { id: 'f-data', label: 'Data (optional)', value: existing?.data ?? '' },
-      { id: 'f-code', label: 'Code file', value: existing?.code ?? '' },
-      { id: 'f-source', label: 'Source file (optional)', value: existing?.source ?? '' },
-      { id: 'f-docs', label: 'Docs URL (optional)', value: existing?.docs ?? '' },
-      { id: 'f-prose', label: 'Prose', value: existing?.prose ?? '', multi: true },
+    const fields: Array<{ key: keyof TourStop; label: string; value: string; multi?: boolean; placeholder?: string }> = [
+      { key: 'heading', label: 'Name', value: existing?.heading ?? '', placeholder: 'e.g. Total' },
+      { key: 'prose', label: 'What it is', value: existing?.prose ?? '', multi: true, placeholder: 'e.g. The amount due: the subtotal plus tax, computed by `totals()`.' },
+      { key: 'data', label: 'Data', value: existing?.data ?? '', placeholder: 'e.g. GET /api/invoices/:id → total' },
+      { key: 'code', label: 'Code file', value: existing?.code ?? '', placeholder: 'e.g. src/screens/Invoice.tsx' },
+      { key: 'source', label: 'Source file', value: existing?.source ?? '', placeholder: 'Optional: where the value is computed' },
+      { key: 'docs', label: 'Docs link', value: existing?.docs ?? '', placeholder: 'Optional' },
+      { key: 'target', label: 'Selector', value: existing?.target ?? selector },
     ]
-
-    const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {}
-
+    const inputs = {} as Record<keyof TourStop, HTMLInputElement | HTMLTextAreaElement>
+    const form = document.createElement('form')
+    form.className = 'panel-form'
     for (const f of fields) {
-      const lbl = document.createElement('label')
-      lbl.setAttribute('for', f.id)
-      lbl.textContent = f.label
-      form.appendChild(lbl)
-
-      const input = f.multi
-        ? document.createElement('textarea')
-        : document.createElement('input')
-      input.id = f.id
+      const id = `dg-${f.key}`
+      const label = document.createElement('label')
+      label.htmlFor = id
+      label.textContent = f.label
+      const input = f.multi ? document.createElement('textarea') : document.createElement('input')
+      input.id = id
       input.value = f.value
-      if (!f.multi) (input as HTMLInputElement).type = 'text'
-      form.appendChild(input)
-      inputs[f.id] = input
+      if (f.placeholder) input.placeholder = f.placeholder
+      if (f.key === 'target' || f.key === 'code') input.spellcheck = false
+      form.append(label, input)
+      inputs[f.key] = input
     }
 
     if (needsAttribute && !existing) {
       const warn = document.createElement('div')
       warn.className = 'add-form-warn'
-      warn.innerHTML = `This element has no <code>data-tour</code> attribute yet. Add this attribute to identify it:<br><code>data-tour="${selector.replace(/^\[data-tour="/, '').replace(/"\]$/, '')}"</code>`
+      warn.append('Add ')
+      const code = document.createElement('code')
+      code.textContent = `data-tour="${tourValue(selector) ?? ''}"`
+      warn.append(code, ' to this element in your code, so the stop keeps finding it.')
       form.appendChild(warn)
     }
 
-    const actions = document.createElement('div')
-    actions.className = 'add-form-actions'
+    const error = document.createElement('p')
+    error.className = 'panel-error'
+    error.hidden = true
+    form.appendChild(error)
 
+    const actions = document.createElement('div')
+    actions.className = 'insp-popup-actions'
+    if (existing) {
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'wt-btn danger'
+      remove.textContent = 'Remove'
+      let armed = false
+      remove.addEventListener('click', () => {
+        if (!armed) {
+          armed = true
+          remove.textContent = 'Remove this stop?'
+          return
+        }
+        this.removeStop(existing)
+      })
+      actions.appendChild(remove)
+    }
+    const spacer = document.createElement('span')
+    spacer.className = 'panel-file'
+    actions.appendChild(spacer)
     const cancel = document.createElement('button')
+    cancel.type = 'button'
     cancel.className = 'wt-btn'
     cancel.textContent = 'Cancel'
-    cancel.addEventListener('click', () => this.closeAddForm())
-    actions.appendChild(cancel)
-
-    const save = document.createElement('button')
-    save.className = 'wt-btn primary'
-    save.textContent = 'Save'
-    save.addEventListener('click', () => {
-      const stop: TourStop = {
-        heading: (inputs['f-heading'] as HTMLInputElement).value.trim(),
-        target: (inputs['f-target'] as HTMLInputElement).value.trim(),
-        data: (inputs['f-data'] as HTMLInputElement).value.trim() || undefined,
-        code: (inputs['f-code'] as HTMLInputElement).value.trim(),
-        source: (inputs['f-source'] as HTMLInputElement).value.trim() || undefined,
-        docs: (inputs['f-docs'] as HTMLInputElement).value.trim() || undefined,
-        prose: (inputs['f-prose'] as HTMLTextAreaElement).value.trim(),
+    cancel.addEventListener('click', () => {
+      if (existing) {
+        this.fillView(panel, el, existing)
+        this.placeNear(panel, el)
+      } else {
+        this.closeInspPopup()
       }
-      if (!stop.heading || !stop.target || !stop.code) return
-      this.saveStop(stop)
-      this.closeAddForm()
     })
-    actions.appendChild(save)
+    const save = document.createElement('button')
+    save.type = 'submit'
+    save.className = 'wt-btn primary'
+    save.textContent = existing ? 'Save' : 'Add stop'
+    actions.append(cancel, save)
     form.appendChild(actions)
 
-    this.shadow.appendChild(form)
-    this.addForm = form
-    ;(inputs['f-heading'] as HTMLInputElement).focus()
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const value = (k: keyof TourStop) => inputs[k].value.trim()
+      const stop: TourStop = {
+        heading: value('heading'),
+        target: value('target'),
+        data: value('data') || undefined,
+        code: value('code'),
+        source: value('source') || undefined,
+        docs: value('docs') || undefined,
+        prose: value('prose'),
+      }
+      const missing = !stop.heading ? 'a name' : !stop.code ? 'the code file' : !stop.target ? 'a selector' : ''
+      if (missing) {
+        error.textContent = `Add ${missing} first.`
+        error.hidden = false
+        return
+      }
+      save.disabled = true
+      const saved = await this.saveStop(stop, existing?.target)
+      save.disabled = false
+      if (!saved) {
+        error.textContent = 'Could not save. Is docugate tour serve still running?'
+        error.hidden = false
+        return
+      }
+      this.fillView(panel, el, stop)
+      this.placeNear(panel, el)
+    })
+
+    panel.appendChild(form)
+    ;(inputs[existing ? 'prose' : 'heading'] as HTMLElement).focus()
+  }
+
+  /** Puts the panel beside its element, below it when there is room, else above. */
+  private placeNear(panel: HTMLElement, el: HTMLElement): void {
+    const rect = el.getBoundingClientRect()
+    const w = panel.offsetWidth || 360
+    const h = panel.offsetHeight || 300
+    const pad = 12
+    let top = rect.bottom + 10
+    if (top + h > window.innerHeight - pad) top = Math.max(pad, rect.top - h - 10)
+    const left = Math.max(pad, Math.min(rect.left, window.innerWidth - w - pad))
+    panel.style.top = `${top}px`
+    panel.style.left = `${left}px`
+  }
+
+  private closeInspPopup(): void {
+    this.inspPopup?.remove()
+    this.inspPopup = null
+    this.inspEl = null
+  }
+
+  private showAddForm(el: HTMLElement, existing?: TourStop): void {
+    this.showInspPopup(el, existing ?? null, true)
   }
 
   private closeAddForm(): void {
-    this.addForm?.remove()
-    this.addForm = null
+    this.closeInspPopup()
   }
 
-  private async saveStop(stop: TourStop): Promise<void> {
+  private async saveStop(stop: TourStop, previousTarget?: string): Promise<boolean> {
     // A page with no tour yet starts one at its own path.
     const route = this.tour?.route ?? location.pathname
     try {
-      await fetch(`${this.base}/stop`, {
+      const res = await fetch(`${this.base}/stop`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route, stop }),
+        body: JSON.stringify({ route, stop, previousTarget }),
       })
+      if (!res.ok) return false
+      this.patchLocalStop(stop, previousTarget)
+      this.toast(`Saved to ${this.tour?.file ?? '.docugate/tour/'}`)
+      return true
     } catch {
-      // best-effort
+      return false
     }
+  }
+
+  private async removeStop(stop: TourStop): Promise<void> {
+    try {
+      const res = await fetch(`${this.base}/stop`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route: this.tour?.route ?? location.pathname, target: stop.target }),
+      })
+      if (!res.ok) throw new Error()
+      if (this.tour) this.tour.stops = this.tour.stops.filter((s) => s.target !== stop.target)
+      this.closeInspPopup()
+      this.toast(`Removed "${stop.heading}"`)
+    } catch {
+      this.toast('Could not remove the stop. Is docugate tour serve still running?')
+    }
+  }
+
+  /** Keeps the in-memory tour in step with a save, before the file watcher reports it. */
+  private patchLocalStop(stop: TourStop, previousTarget?: string): void {
+    if (!this.tour) {
+      this.tour = { route: location.pathname, title: document.title || 'Tour', stops: [stop] }
+      return
+    }
+    const i = this.tour.stops.findIndex((s) => s.target === (previousTarget ?? stop.target))
+    if (i >= 0) this.tour.stops[i] = stop
+    else this.tour.stops.push(stop)
+  }
+
+  private async openInEditor(path: string, find?: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.base}/open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, find }),
+      })
+      if (!res.ok) throw new Error()
+      this.toast(`Opened ${path.split('/').pop()}`)
+    } catch {
+      this.toast('Could not open your editor. Set DOCUGATE_EDITOR (for example: code) and restart docugate tour serve.')
+    }
+  }
+
+  private toast(message: string): void {
+    this.shadow.querySelector('.toast')?.remove()
+    const t = document.createElement('div')
+    t.className = 'toast surface'
+    t.setAttribute('role', 'status')
+    t.textContent = message
+    this.shadow.appendChild(t)
+    setTimeout(() => t.remove(), 3200)
   }
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
@@ -1252,10 +1447,13 @@ class DocugatePill {
   }
 
   private async reload(): Promise<void> {
+    const path = location.pathname
     await this.load()
     if (this.walkthroughActive) this.stopWalkthrough()
-    if (this.inspectorActive) this.stopInspector()
     this.render()
+    // A new page ends the inspection; an edit on this page keeps it going.
+    if (this.inspectorActive && path !== this.inspectedPath) this.stopInspector()
+    this.inspectedPath = path
   }
 
   // ── URL change detection ──────────────────────────────────────────────────

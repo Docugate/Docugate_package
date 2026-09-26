@@ -1,6 +1,7 @@
+import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, realpathSync, watch, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, resolve, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadTours, matchRoute, parseTourFile, routeToFilename, serializeTourFile } from './tour.js'
 import type { Tour, TourStop } from './tour.js'
@@ -106,7 +107,7 @@ function handleGetTour(req: IncomingMessage, res: ServerResponse, root: string):
     sendJson(res, 404, { error: 'not found' })
     return
   }
-  sendJson(res, 200, { route: match.route, title: match.title, stops: match.stops })
+  sendJson(res, 200, { route: match.route, title: match.title, file: match.file, stops: match.stops })
 }
 
 function handleGetEvents(req: IncomingMessage, res: ServerResponse, root: string): void {
@@ -143,7 +144,7 @@ function handleGetEvents(req: IncomingMessage, res: ServerResponse, root: string
 }
 
 async function handlePutStop(req: IncomingMessage, res: ServerResponse, root: string): Promise<void> {
-  let body: { route: string; title?: string; stop: TourStop }
+  let body: { route: string; title?: string; stop: TourStop; previousTarget?: string }
   try {
     const text = await readBody(req)
     body = JSON.parse(text) as { route: string; title?: string; stop: TourStop }
@@ -152,7 +153,7 @@ async function handlePutStop(req: IncomingMessage, res: ServerResponse, root: st
     return
   }
 
-  const { route, title: bodyTitle, stop } = body
+  const { route, title: bodyTitle, stop, previousTarget } = body
   if (!route || !stop) {
     sendJson(res, 400, { error: 'body must have route and stop' })
     return
@@ -182,8 +183,9 @@ async function handlePutStop(req: IncomingMessage, res: ServerResponse, root: st
     }
   }
 
-  // Upsert: find by target and update, or append.
-  const idx = tour.stops.findIndex((s) => s.target === stop.target)
+  // Upsert: find the stop being edited (by its old target when the edit
+  // changed it) and update it in place, or append a new one.
+  const idx = tour.stops.findIndex((s) => s.target === (previousTarget ?? stop.target))
   if (idx >= 0) {
     tour.stops[idx] = stop
   } else {
@@ -192,6 +194,85 @@ async function handlePutStop(req: IncomingMessage, res: ServerResponse, root: st
 
   writeFileSync(filepath, serializeTourFile(tour))
   sendJson(res, 200, { ok: true })
+}
+
+/** DELETE /stop { route, target }: removes one stop, leaving the rest of the file as it was. */
+async function handleDeleteStop(req: IncomingMessage, res: ServerResponse, root: string): Promise<void> {
+  let body: { route?: string; target?: string }
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    sendJson(res, 400, { error: 'invalid JSON body' })
+    return
+  }
+  const existing = loadTours(root).find((t) => t.route === body.route)
+  if (!existing?.file || !body.target) {
+    sendJson(res, 404, { error: 'no such stop' })
+    return
+  }
+  const filepath = join(root, existing.file)
+  const tour = parseTourFile(readFileSync(filepath, 'utf8'), existing.file)
+  const before = tour.stops.length
+  tour.stops = tour.stops.filter((s) => s.target !== body.target)
+  if (tour.stops.length === before) {
+    sendJson(res, 404, { error: 'no such stop' })
+    return
+  }
+  writeFileSync(filepath, serializeTourFile(tour))
+  sendJson(res, 200, { ok: true })
+}
+
+/**
+ * The editor `docugate tour serve` was started from, as the command that opens
+ * a file at a line. DOCUGATE_EDITOR wins; otherwise the integrated terminal's
+ * environment says which VS Code family editor it is.
+ */
+export function editorCommand(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.DOCUGATE_EDITOR) return env.DOCUGATE_EDITOR
+  const hint = `${env.VSCODE_GIT_ASKPASS_NODE ?? ''} ${env.VSCODE_CWD ?? ''} ${env.CURSOR_TRACE_ID ? 'cursor' : ''}`.toLowerCase()
+  if (hint.includes('cursor')) return 'cursor'
+  if (hint.includes('windsurf')) return 'windsurf'
+  if (hint.includes('insiders')) return 'code-insiders'
+  return 'code'
+}
+
+/** The 1-based line of the first occurrence of `find` in `text`, or 1. */
+export function lineOf(text: string, find?: string): number {
+  if (!find) return 1
+  const index = text.split(/\r?\n/).findIndex((line) => line.includes(find))
+  return index >= 0 ? index + 1 : 1
+}
+
+/**
+ * POST /open { path, find? }: opens a file of this repository in the editor,
+ * at the line that contains `find` (the element's data-tour value), so "Code"
+ * in the pill jumps straight to the element. Only files inside the repository.
+ */
+async function handleOpen(req: IncomingMessage, res: ServerResponse, root: string): Promise<void> {
+  let body: { path?: string; find?: string }
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    sendJson(res, 400, { error: 'invalid JSON body' })
+    return
+  }
+  const abs = resolve(root, body.path ?? '')
+  const rel = relative(root, abs)
+  if (!body.path || rel.startsWith('..') || isAbsolute(rel) || !existsSync(abs) || /["%^&|<>`$]/.test(abs)) {
+    sendJson(res, 404, { error: 'no such file in this repository' })
+    return
+  }
+  const line = lineOf(readFileSync(abs, 'utf8'), body.find)
+  const command = editorCommand()
+  // One command string, the path quoted: editor launchers are .cmd files on
+  // Windows, which only run through a shell.
+  const child = spawn(`${command} -g "${abs}:${line}"`, { shell: true, stdio: 'ignore' })
+  child.on('error', () => sendJson(res, 501, { error: `could not run ${command}` }))
+  child.on('exit', (code) => {
+    if (res.headersSent) return
+    if (code === 0) sendJson(res, 200, { ok: true, line })
+    else sendJson(res, 501, { error: `could not run ${command}`, line })
+  })
 }
 
 function handleGetPill(res: ServerResponse): void {
@@ -228,12 +309,33 @@ export function startTourServer(root: string, port: number): Promise<TourServer>
       const url = new URL(req.url ?? '/', 'http://localhost')
       const path = url.pathname
 
+      // The pill runs on the app's own port, so a JSON PUT from it is a
+      // cross-origin request: the browser asks first, and must get a yes.
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '600',
+        })
+        res.end()
+        return
+      }
+
       if (req.method === 'GET' && path === '/tour') {
         handleGetTour(req, res, root)
       } else if (req.method === 'GET' && path === '/events') {
         handleGetEvents(req, res, root)
       } else if (req.method === 'PUT' && path === '/stop') {
         handlePutStop(req, res, root).catch((err: Error) => {
+          sendJson(res, 500, { error: err.message })
+        })
+      } else if (req.method === 'DELETE' && path === '/stop') {
+        handleDeleteStop(req, res, root).catch((err: Error) => {
+          sendJson(res, 500, { error: err.message })
+        })
+      } else if (req.method === 'POST' && path === '/open') {
+        handleOpen(req, res, root).catch((err: Error) => {
           sendJson(res, 500, { error: err.message })
         })
       } else if (req.method === 'GET' && path === '/pill.js') {
