@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { check } from './check.js'
 import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
 import { init } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
 import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
+import { loadTours } from './tour.js'
+import { startTourServer } from './tour-server.js'
 
 const SITE = 'https://www.trydocugate.site'
 
@@ -19,6 +21,8 @@ Commands
   check       Check the docs the way DocuGate will read them
   openapi     Prepare an OpenAPI spec for DocuGate's API reference
   tour init   Write the first tour of this app with IBM Bob
+  tour serve  Start a local server that serves tour data for the pill
+  tour export Write every tour screen to a single JSON file
 
 init
   --dir <folder>       Docs folder (default: docs)
@@ -40,6 +44,12 @@ tour init
   --max-cost <n>       Most Bobcoins the run may spend (default: 3)
   --team-id <id>       Bob team to run under, for API keys that need one
 
+tour serve
+  --port <n>           Port to listen on (default: 4178)
+
+tour export <file>
+  Write all tour screens to <file> as JSON.
+
 Run it from the root of your repository.
 ${SITE}
 `
@@ -51,15 +61,16 @@ const yellow = (t: string) => paint(33, t)
 const green = (t: string) => paint(32, t)
 const dim = (t: string) => paint(2, t)
 
-type Args = { command?: string; sub?: string; flags: Map<string, string[]>; bools: Set<string> }
+type Args = { command?: string; sub?: string; sub2?: string; flags: Map<string, string[]>; bools: Set<string> }
 
-const VALUE_FLAGS = new Set(['dir', 'title', 'from', 'out', 'include', 'exclude', 'redact', 'max-cost', 'team-id'])
+const VALUE_FLAGS = new Set(['dir', 'title', 'from', 'out', 'include', 'exclude', 'redact', 'max-cost', 'team-id', 'port'])
 
 function parse(argv: string[]): Args {
   const flags = new Map<string, string[]>()
   const bools = new Set<string>()
   let command: string | undefined
   let sub: string | undefined
+  let sub2: string | undefined
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -74,9 +85,10 @@ function parse(argv: string[]): Args {
       } else bools.add(name)
     } else if (!command) command = arg
     else if (command === 'tour' && !sub) sub = arg
+    else if (command === 'tour' && sub === 'export' && !sub2) sub2 = arg
     else fail(`Unexpected argument "${arg}".`)
   }
-  return { command, sub, flags, bools }
+  return { command, sub, sub2, flags, bools }
 }
 
 function fail(message: string): never {
@@ -171,57 +183,94 @@ async function main() {
     }
 
     case 'tour': {
-      if (args.sub !== 'init') fail(args.sub ? `Unknown tour command "${args.sub}".` : 'Say which: docugate tour init.')
-      console.log(`${dim('Bob is reading your code and writing the tour. This takes a minute or two.')}`)
-      let result
-      try {
-        result = tourInit(root, { maxCost: one('max-cost'), teamId: one('team-id') })
-      } catch (error) {
-        if (error instanceof BobKeyMissingError) {
-          console.error(
-            `${red('error')} Bob Shell needs an API key to run on its own (your IDE sign-in is not used here).
+      switch (args.sub) {
+        case 'init': {
+          console.log(`${dim('Bob is reading your code and writing the tour. This takes a minute or two.')}`)
+          let result
+          try {
+            result = tourInit(root, { maxCost: one('max-cost'), teamId: one('team-id') })
+          } catch (error) {
+            if (error instanceof BobKeyMissingError) {
+              console.error(
+                `${red('error')} Bob Shell needs an API key to run on its own (your IDE sign-in is not used here).
 ` +
-              `1. At https://bob.ibm.com, open your instance, then API keys, and create an Inference key.
+                  `1. At https://bob.ibm.com, open your instance, then API keys, and create an Inference key.
 ` +
-              `2. Save it as the BOB_API_KEY environment variable, then open a new terminal:
+                  `2. Save it as the BOB_API_KEY environment variable, then open a new terminal:
 ` +
-              `     PowerShell   [Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")
+                  `     PowerShell   [Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")
 ` +
-              `     macOS/Linux  export BOB_API_KEY=<key>   (add it to your shell profile)
+                  `     macOS/Linux  export BOB_API_KEY=<key>   (add it to your shell profile)
 ` +
-              dim('Keep the key out of your repository. https://bob.ibm.com/docs/ide/account/api-keys'),
-          )
-          process.exit(2)
-        }
-        if (!(error instanceof BobMissingError)) throw error
-        console.error(
-          `${red('error')} Bob Shell is not installed, and tours are written by IBM Bob.
+                  dim('Keep the key out of your repository. https://bob.ibm.com/docs/ide/account/api-keys'),
+              )
+              process.exit(2)
+            }
+            if (!(error instanceof BobMissingError)) throw error
+            console.error(
+              `${red('error')} Bob Shell is not installed, and tours are written by IBM Bob.
 ` +
-            `Install it (Node 24 or later), sign in, then run this again:
+                `Install it (Node 24 or later), sign in, then run this again:
 ` +
-            `  Windows      powershell -c "irm -Uri https://bob.ibm.com/download/bobshell.ps1 | iex"
+                `  Windows      powershell -c "irm -Uri https://bob.ibm.com/download/bobshell.ps1 | iex"
 ` +
-            `  macOS/Linux  curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash
+                `  macOS/Linux  curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash
 ` +
-            dim('https://bob.ibm.com/docs/shell/getting-started/install-and-setup'),
-        )
-        process.exit(2)
-      }
-      for (const f of result.setup) console.log(`  ${green('created')}  ${f}`)
-      for (const f of result.added) console.log(`  ${green('added')}    ${f}`)
-      for (const f of result.restored) console.log(`  ${yellow('kept')}     ${f} ${dim('(Bob changed it; your version was put back)')}`)
-      if (!result.added.length) console.log(`  ${dim('No new screens: every screen Bob found already has a tour file.')}`)
+                dim('https://bob.ibm.com/docs/shell/getting-started/install-and-setup'),
+            )
+            process.exit(2)
+          }
+          for (const f of result.setup) console.log(`  ${green('created')}  ${f}`)
+          for (const f of result.added) console.log(`  ${green('added')}    ${f}`)
+          for (const f of result.restored) console.log(`  ${yellow('kept')}     ${f} ${dim('(Bob changed it; your version was put back)')}`)
+          if (!result.added.length) console.log(`  ${dim('No new screens: every screen Bob found already has a tour file.')}`)
 
-      const stats = result.stats
-      const parts = [
-        result.mode === 'agent' ? 'agent mode' : 'Tour Writer mode',
-        stats?.durationMs !== undefined ? `${Math.round(stats.durationMs / 1000)}s` : '',
-        stats?.cost !== undefined ? `${stats.cost} Bobcoins` : '',
-      ].filter(Boolean)
-      console.log(`
+          const stats = result.stats
+          const parts = [
+            result.mode === 'agent' ? 'agent mode' : 'Tour Writer mode',
+            stats?.durationMs !== undefined ? `${Math.round(stats.durationMs / 1000)}s` : '',
+            stats?.cost !== undefined ? `${stats.cost} Bobcoins` : '',
+          ].filter(Boolean)
+          console.log(`
 ${dim(`Bob: ${parts.join(', ')}`)}`)
-      console.log('Next: read the new files, fix anything Bob got wrong, and commit them. They are yours now.')
-      return
+          console.log('Next: read the new files, fix anything Bob got wrong, and commit them. They are yours now.')
+          return
+        }
+
+        case 'serve': {
+          const tourDir = `${root}/.docugate/tour`
+          if (!existsSync(tourDir)) {
+            console.error(`${red('error')} .docugate/tour/ not found. Run ${green('docugate tour init')} first.`)
+            process.exit(2)
+          }
+          const port = parseInt(one('port') ?? '4178', 10)
+          const server = await startTourServer(root, port)
+          const url = `http://localhost:${server.port}`
+          const screens = loadTours(root)
+          console.log(`${green('Tour server')}  ${url}`)
+          console.log(`${plural(screens.length, 'screen')} loaded from .docugate/tour/`)
+          console.log(`\nPaste into your app's HTML during development:`)
+          console.log(`  <script src="${url}/pill.js"></script>`)
+          // Keep the process alive; Ctrl-C will stop it.
+          process.on('SIGINT', () => { server.close(); process.exit(0) })
+          process.on('SIGTERM', () => { server.close(); process.exit(0) })
+          await new Promise(() => { /* run until signal */ })
+          return
+        }
+
+        case 'export': {
+          const outFile = args.sub2
+          if (!outFile) fail('Say where to write: docugate tour export <file>.')
+          const screens = loadTours(root)
+          const json = JSON.stringify(screens.map(({ route, title, stops }) => ({ route, title, stops })), null, 2)
+          writeFileSync(outFile, json)
+          console.log(`${green('wrote')}  ${outFile} ${dim(`(${plural(screens.length, 'screen')})`)}`)
+          return
+        }
+
+        default:
+          fail(args.sub ? `Unknown tour command "${args.sub}".` : 'Say which: docugate tour init.')
+      }
     }
 
     default:

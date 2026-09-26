@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseTourFile, serializeTourFile, loadTours, matchRoute } from '../dist/tour.js'
+import { parseTourFile, serializeTourFile, loadTours, matchRoute, routeToFilename } from '../dist/tour.js'
 import { check } from '../dist/check.js'
 
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url))
@@ -330,3 +330,28 @@ test('check still warns when prop string is renamed', () => {
     'expected warning when prop string is renamed',
   )
 })
+
+// ---------------------------------------------------------------------------
+// routeToFilename
+// ---------------------------------------------------------------------------
+
+test('routeToFilename: root route becomes home.md', () => {
+  assert.equal(routeToFilename('/'), 'home.md')
+})
+
+test('routeToFilename: simple route', () => {
+  assert.equal(routeToFilename('/invoices'), 'invoices.md')
+})
+
+test('routeToFilename: route with param', () => {
+  assert.equal(routeToFilename('/invoices/:id'), 'invoices-id.md')
+})
+
+test('routeToFilename: nested route with multiple params', () => {
+  assert.equal(routeToFilename('/orgs/:org/repos/:repo'), 'orgs-org-repos-repo.md')
+})
+
+test('routeToFilename: lowercase', () => {
+  assert.equal(routeToFilename('/MyPage'), 'mypage.md')
+})
+

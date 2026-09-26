@@ -179,3 +179,19 @@ export function matchRoute(route: string, pathname: string): boolean {
   }
   return true
 }
+
+/**
+ * Derive the tour filename from a route.
+ * Strips the leading `/`, replaces `/` and `:` with `-`, lower-cases the result,
+ * and appends `.md`. The root route `/` becomes `home.md`.
+ *
+ * Examples:
+ *   routeToFilename('/')                      → 'home.md'
+ *   routeToFilename('/invoices/:id')           → 'invoices-id.md'
+ *   routeToFilename('/orgs/:org/repos/:repo')  → 'orgs-org-repos-repo.md'
+ */
+export function routeToFilename(route: string): string {
+  const trimmed = route.replace(/^\//, '')
+  if (!trimmed) return 'home.md'
+  return trimmed.replace(/[/:]/g, '-').replace(/-+/g, '-').replace(/-$/, '').toLowerCase() + '.md'
+}
