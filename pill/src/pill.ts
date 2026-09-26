@@ -244,6 +244,7 @@ kbd {
 .switch { position: relative; width: 28px; height: 16px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); transition: background 0.15s; flex-shrink: 0; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .menu-item[aria-checked="true"] .switch { background: #F4C43F; }
+.menu-item { padding: 9px 10px; }
 .menu-item[aria-checked="true"] .switch::after { transform: translateX(12px); background: #10122F; }
 .menu-foot {
   display: flex;
@@ -388,6 +389,40 @@ kbd {
   font-size: 12.5px;
   animation: pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+.wt-section { padding: 6px; }
+.wt-head { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 8px 8px 6px; border-radius: 8px; cursor: pointer; }
+.wt-head:hover, .wt-head:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.wt-head .chev { width: 16px; height: 16px; color: #a1a1a1; transition: transform 0.2s; flex-shrink: 0; }
+.wt-head[aria-expanded="false"] .chev { transform: rotate(180deg); }
+.wt-title { font-weight: 600; color: #fff; margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticks { display: flex; gap: 2px; }
+.ticks i { width: 2px; height: 11px; border-radius: 1px; background: rgba(255, 255, 255, 0.16); }
+.ticks i.on { background: #F4C43F; }
+.wt-count { font-size: 12px; color: #a1a1a1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.steps { margin: 4px 0 2px; padding: 6px; border-radius: 10px; background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.06); }
+.step-row { display: flex; align-items: center; border-radius: 7px; }
+.step-row:hover { background: rgba(255, 255, 255, 0.06); }
+.step, .add-step { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 7px 8px; border-radius: 7px; cursor: pointer; color: #ededed; }
+.step:focus-visible, .add-step:focus-visible, .step-edit:focus-visible { outline: 2px solid #F4C43F; outline-offset: -2px; }
+.step:disabled { cursor: default; opacity: 0.45; }
+.step .label, .add-step .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border-radius: 6px; font-size: 11px; font-weight: 600; color: #a1a1a1; border: 1px solid rgba(255, 255, 255, 0.14); }
+.num svg { width: 13px; height: 13px; }
+.step-row.done .num { background: #F4C43F; border-color: #F4C43F; color: #10122F; }
+.step-row.done .label { color: #8f8f8f; }
+.step-row.current .num { background: #ededed; border-color: #ededed; color: #0c0c0e; }
+.step-edit { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 26px; height: 26px; margin-right: 4px; border-radius: 6px; color: #8f8f8f; cursor: pointer; opacity: 0; }
+.step-edit svg { width: 15px; height: 15px; }
+.step-row:hover .step-edit, .step-edit:focus-visible { opacity: 1; }
+.step-edit:hover { color: #F4C43F; background: rgba(255, 255, 255, 0.07); }
+.step-edit:disabled { display: none; }
+.add-step { color: #a1a1a1; }
+.add-step .num { border-style: dashed; font-size: 14px; font-weight: 400; }
+.add-step:hover { background: rgba(255, 255, 255, 0.06); color: #ededed; }
+.wt-empty { margin: 4px 8px 6px; font-size: 12.5px; line-height: 1.5; color: #a1a1a1; }
+.item-text { display: flex; flex-direction: column; gap: 1px; }
+.menu-list { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.menu { width: 320px; }
 .add-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 14px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -600,6 +635,7 @@ class DocugatePill {
   private addForm: HTMLElement | null = null
   private inspEl: HTMLElement | null = null
   private inspectedPath = location.pathname
+  private listCollapsed = false
   private highlightEl: HTMLElement | null = null
   private evtSource: EventSource | null = null
   private boundHandleKey: (e: KeyboardEvent) => void
@@ -741,47 +777,152 @@ class DocugatePill {
 
   private openMenu(): void {
     this.closeMenu()
-    const stops = this.tour?.stops.length ?? 0
     const menu = document.createElement('div')
     menu.className = 'menu surface'
-    menu.setAttribute('role', 'menu')
+    menu.setAttribute('role', 'dialog')
     menu.setAttribute('aria-label', 'DocuGate tour')
+    menu.append(this.walkthroughSection(), this.inspectorRow(), this.menuFooter())
 
-    const head = document.createElement('div')
-    head.className = 'menu-head'
-    const route = document.createElement('span')
-    route.className = 'menu-route'
-    route.textContent = this.tour?.route ?? location.pathname
-    const tag = document.createElement('span')
-    tag.className = `menu-tag${stops ? '' : ' empty'}`
-    tag.textContent = stops ? `${stops} stop${stops === 1 ? '' : 's'}` : 'No tour yet'
-    head.append(route, tag)
+    // Open away from the corner the badge sits in.
+    const [v, h] = this.corner.split('-')
+    pin(menu, this.corner, 44)
+    menu.style.setProperty('--origin', `${v} ${h}`)
+    menu.style.setProperty('--rise', v === 'bottom' ? '6px' : '-6px')
+
+    this.shadow.appendChild(menu)
+    this.menuEl = menu
+    this.menuOpen = true
+    this.pillBtn?.classList.add('open')
+    this.pillBtn?.setAttribute('aria-expanded', 'true')
+
+    const close = (e: Event) => {
+      const inside = e.composedPath().some((n) => n === menu || n === this.pillBtn)
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !inside) {
+        this.closeMenu()
+        document.removeEventListener('click', close, true)
+        document.removeEventListener('keydown', close, true)
+      }
+    }
+    document.addEventListener('click', close, true)
+    document.addEventListener('keydown', close, true)
+  }
+
+  /**
+   * The walkthrough as a checklist: progress at the top, then every step with
+   * its state. Click a step to go there, the pencil to correct it, and the last
+   * row to add one. A page with no walkthrough offers its first step.
+   */
+  private walkthroughSection(): HTMLElement {
+    const stops = this.tour?.stops ?? []
+    const seen = this.visited()
+    const done = stops.filter((s) => seen.has(s.target)).length
+    const current = stops.find((s) => !seen.has(s.target))
+
+    const section = document.createElement('div')
+    section.className = 'wt-section'
+
+    const head = document.createElement('button')
+    head.className = 'wt-head'
+    head.setAttribute('aria-expanded', String(!this.listCollapsed))
+    const ticks = 20
+    const lit = stops.length ? Math.round((done / stops.length) * ticks) : 0
+    head.innerHTML =
+      `<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>` +
+      `<span class="wt-title"></span>` +
+      (stops.length
+        ? `<span class="ticks" aria-hidden="true">${Array.from({ length: ticks }, (_, i) => `<i class="${i < lit ? 'on' : ''}"></i>`).join('')}</span><span class="wt-count">${done}/${stops.length}</span>`
+        : `<span class="wt-count">No steps yet</span>`)
+    head.querySelector('.wt-title')!.textContent = this.tour?.title ?? 'Walkthrough'
+    head.addEventListener('click', () => {
+      this.listCollapsed = !this.listCollapsed
+      this.openMenu()
+    })
+    section.appendChild(head)
+    if (this.listCollapsed) return section
 
     const list = document.createElement('div')
-    list.className = 'menu-list'
+    list.className = 'steps'
+    stops.forEach((stop, i) => {
+      const state = seen.has(stop.target) ? 'done' : stop === current ? 'current' : 'next'
+      const onPage = document.querySelector(stop.target) !== null
+      const row = document.createElement('div')
+      row.className = `step-row ${state}`
 
-    const item = (label: string, right: string, onClick: () => void, disabled = false) => {
-      const b = document.createElement('button')
-      b.className = 'menu-item'
-      b.setAttribute('role', 'menuitem')
-      b.disabled = disabled
-      b.innerHTML = `<span></span>${right}`
-      b.firstElementChild!.textContent = label
-      b.addEventListener('click', () => { this.closeMenu(); onClick() })
-      list.appendChild(b)
-      return b
-    }
-
-    item('Walkthrough', stops ? '<kbd>&#8594;</kbd>' : '<span class="menu-hint">No stops yet</span>', () => this.startWalkthrough(), !stops)
-    const insp = item('Inspector', '<span class="switch" aria-hidden="true"></span>', () => this.toggleInspector())
-    insp.setAttribute('role', 'menuitemcheckbox')
-    insp.setAttribute('aria-checked', String(this.inspectorActive))
-    if (!this.isStaticMode) {
-      item('Add to tour', '<span class="menu-hint">Click an element</span>', () => {
-        if (!this.inspectorActive) this.toggleInspector()
+      const go = document.createElement('button')
+      go.className = 'step'
+      go.disabled = !onPage
+      go.title = onPage ? `Go to step ${i + 1}` : 'Not on the page right now'
+      go.innerHTML =
+        `<span class="num">${state === 'done' ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.5l2.5 2.5L12 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' : i + 1}</span><span class="label"></span>`
+      go.querySelector('.label')!.textContent = stop.heading
+      go.addEventListener('click', () => {
+        this.closeMenu()
+        this.startWalkthrough(stop)
       })
+      row.appendChild(go)
+
+      if (!this.isStaticMode) {
+        const edit = document.createElement('button')
+        edit.className = 'step-edit'
+        edit.setAttribute('aria-label', `Edit step ${i + 1}, ${stop.heading}`)
+        edit.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5l2 2L6 12H4v-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`
+        edit.disabled = !onPage
+        edit.addEventListener('click', () => {
+          const el = document.querySelector(stop.target) as HTMLElement | null
+          this.closeMenu()
+          if (el) this.showInspPopup(el, stop, true)
+        })
+        row.appendChild(edit)
+      }
+      list.appendChild(row)
+    })
+
+    if (!stops.length) {
+      const empty = document.createElement('p')
+      empty.className = 'wt-empty'
+      empty.textContent = this.isStaticMode
+        ? 'This page has no walkthrough.'
+        : 'This page has no walkthrough yet. Add the first step yourself, or let IBM Bob write it with docugate tour init.'
+      list.appendChild(empty)
     }
 
+    if (!this.isStaticMode) {
+      const add = document.createElement('button')
+      add.className = 'add-step'
+      add.innerHTML = `<span class="num">+</span><span class="label"></span>`
+      add.querySelector('.label')!.textContent = stops.length ? 'Add a step' : 'Add the first step'
+      add.addEventListener('click', () => {
+        this.closeMenu()
+        if (!this.inspectorActive) this.toggleInspector()
+        this.toast('Click the element this step should explain.')
+      })
+      list.appendChild(add)
+    }
+    section.appendChild(list)
+    return section
+  }
+
+  /** One switch: while it is on, clicking anything shows its info, or lets you add it. */
+  private inspectorRow(): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'menu-list'
+    const b = document.createElement('button')
+    b.className = 'menu-item'
+    b.setAttribute('role', 'switch')
+    b.setAttribute('aria-checked', String(this.inspectorActive))
+    b.innerHTML = `<span class="item-text"><span></span><span class="menu-hint"></span></span><span class="switch" aria-hidden="true"></span>`
+    const [label, hint] = b.querySelectorAll('.item-text span')
+    label.textContent = 'Inspector'
+    hint.textContent = this.isStaticMode ? 'Click anything to see what it is' : 'Click anything to see it, fix it, or add it'
+    b.addEventListener('click', () => {
+      this.closeMenu()
+      this.toggleInspector()
+    })
+    row.appendChild(b)
+    return row
+  }
+
+  private menuFooter(): HTMLElement {
     const foot = document.createElement('div')
     foot.className = 'menu-foot'
     const status = document.createElement('span')
@@ -801,32 +942,26 @@ class DocugatePill {
       this.removePill()
     })
     foot.append(status, hide)
+    return foot
+  }
 
-    menu.append(head, list, foot)
-
-    // Open away from the corner the badge sits in.
-    const [v, h] = this.corner.split('-')
-    pin(menu, this.corner, 44)
-    menu.style.setProperty('--origin', `${v} ${h}`)
-    menu.style.setProperty('--rise', v === 'bottom' ? '6px' : '-6px')
-
-    this.shadow.appendChild(menu)
-    this.menuEl = menu
-    this.menuOpen = true
-    this.pillBtn?.classList.add('open')
-    this.pillBtn?.setAttribute('aria-expanded', 'true')
-    ;(list.querySelector('.menu-item:not(:disabled)') as HTMLElement | null)?.focus()
-
-    const close = (e: Event) => {
-      const inside = e.composedPath().some((n) => n === menu || n === this.pillBtn)
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !inside) {
-        this.closeMenu()
-        document.removeEventListener('click', close, true)
-        document.removeEventListener('keydown', close, true)
-      }
+  /** Steps seen on this screen in this tab, by target, so the checklist shows progress. */
+  private visited(): Set<string> {
+    try {
+      return new Set(JSON.parse(sessionStorage.getItem(`docugate-seen:${this.tour?.route ?? location.pathname}`) ?? '[]'))
+    } catch {
+      return new Set()
     }
-    document.addEventListener('click', close, true)
-    document.addEventListener('keydown', close, true)
+  }
+
+  private markVisited(target: string): void {
+    const seen = this.visited()
+    seen.add(target)
+    try {
+      sessionStorage.setItem(`docugate-seen:${this.tour?.route ?? location.pathname}`, JSON.stringify([...seen]))
+    } catch {
+      // progress is only shown for this session anyway
+    }
   }
 
   private closeMenu(): void {
@@ -839,16 +974,17 @@ class DocugatePill {
 
   // ── Walkthrough ───────────────────────────────────────────────────────────
 
-  private startWalkthrough(): void {
+  private startWalkthrough(from?: TourStop): void {
     if (!this.tour) return
     // Filter to stops whose target exists in the DOM
     this.wtStops = this.tour.stops.filter((s) => document.querySelector(s.target) !== null)
     if (!this.wtStops.length) return
+    const startAt = from ? Math.max(0, this.wtStops.indexOf(from)) : 0
 
     this.walkthroughActive = true
     // The card needs the corner the badge sits in; it steps aside until Done.
     this.pillBtn?.classList.add('away')
-    this.wtIndex = 0
+    this.wtIndex = startAt
     this.canvas = createRingCanvas()
     document.body.appendChild(this.canvas)
     document.addEventListener('keydown', this.boundHandleKey)
@@ -860,6 +996,7 @@ class DocugatePill {
     const stop = this.wtStops[this.wtIndex]
     const target = document.querySelector(stop.target)
     if (!target) { this.nextWtStep(); return }
+    this.markVisited(stop.target)
 
     const rect = target.getBoundingClientRect()
     if (this.canvas) {
