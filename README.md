@@ -37,7 +37,7 @@ September 25 to 27, 2026). To be clear about what was built when:
   from DocuGate's private repository with its history.
 * **During the event, with IBM Bob:** the UI tour: the `.docugate/tour/` format,
   `docugate tour`, tour checks in `docugate check`, the pill, and the Tour Writer
-  mode. Screenshots of the Bob sessions are in `docs/bob-sessions/`.
+  mode. Screenshots of the Bob sessions are in `bob_sessions/`.
 
 ## Several repositories in one space
 

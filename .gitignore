@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Credentials: never commit these (IBM can suspend accounts that leak keys)
+.env
+.env.*
+!.env.example
+*.env
+ibmcloud-credentials.json
+ibm-credentials.env
+*-credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
