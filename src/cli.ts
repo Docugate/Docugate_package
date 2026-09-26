@@ -10,6 +10,8 @@ import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
 import { tourInstall, hasPillSnippet, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import { loadTours } from './tour.js'
 import { startTourServer } from './tour-server.js'
+import { login, clearCredentials, loadCredentials } from './auth.js'
+import { BASE_URL, getSession } from './api.js'
 
 const SITE = 'https://www.trydocugate.site'
 
@@ -20,6 +22,9 @@ Usage
 
 Commands
   init              Set up this repository for DocuGate (interactive)
+  login             Sign in to DocuGate with GitHub
+  logout            Sign out and delete saved credentials
+  whoami            Print the currently signed-in user
   check             Check the docs the way DocuGate will read them
   openapi           Prepare an OpenAPI spec for DocuGate's API reference
   tour init         Write the first tour of this app with IBM Bob
@@ -132,6 +137,64 @@ async function main() {
   if (args.bools.has('help') || !args.command) return console.log(HELP)
 
   switch (args.command) {
+    case 'login': {
+      const creds = loadCredentials()
+      if (creds) {
+        // Already signed in — confirm with the server.
+        try {
+          const { user } = await getSession()
+          if (user) {
+            console.log(`Already signed in as @${user.githubLogin}`)
+            return
+          }
+        } catch {
+          // server unreachable; proceed to sign in again
+        }
+      }
+      const { token } = await login(BASE_URL, args.bools.has('yes') ? {} : {})
+      try {
+        const { user } = await getSession()
+        if (user) {
+          console.log(`Signed in as @${user.githubLogin}`)
+        } else {
+          console.log('Signed in.')
+        }
+      } catch {
+        // token saved; just confirm
+        console.log('Signed in.')
+      }
+      void token
+      return
+    }
+
+    case 'logout': {
+      clearCredentials()
+      console.log('Signed out.')
+      return
+    }
+
+    case 'whoami': {
+      const creds = loadCredentials()
+      if (!creds) {
+        console.log('Not signed in. Run docugate login.')
+        return
+      }
+      let session
+      try {
+        session = await getSession()
+      } catch (err) {
+        console.error(`Signed in, but couldn't reach DocuGate to confirm who you are: ${(err as Error).message}`)
+        process.exitCode = 1
+        return
+      }
+      if (session.user) {
+        console.log(`@${session.user.githubLogin}`)
+      } else {
+        console.log('Not signed in. Run docugate login.')
+      }
+      return
+    }
+
     case 'init': {
       const roleFlag = one('role') as Role | undefined
       if (roleFlag && !['frontend', 'backend', 'both'].includes(roleFlag)) {

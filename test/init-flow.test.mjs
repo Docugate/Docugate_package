@@ -54,14 +54,23 @@ function fakeBob(root, write = {}) {
 
 // ── frontend role ─────────────────────────────────────────────────────────────
 
+/** Default no-op injections so tests never touch the real API or browser.
+ * getSessionFn returns null user (not signed in); loginFn silently succeeds
+ * so --yes tests don't fail when they auto-sign-in. */
+const NO_AUTH = {
+  getSessionFn: async () => ({ user: null }),
+  loginFn: async () => ({ token: '' }),
+  getRemoteFn: () => null,
+}
+
 test('frontend role: saves role, runs tour init, runs tour install', async () => {
   const html = '<html><body></body></html>'
   const dir = repo({ 'index.html': html })
   const bob = fakeBob(dir, { '.docugate/tour/home.md': '---\nroute: /\ntitle: Home\n---\n' })
-  // answers: role=frontend, run tour=y, run install=y
-  const { io, printed } = fakeIO(['frontend', 'y', 'y'])
+  // answers: role=frontend, sign in=n, run tour=y, run install=y
+  const { io, printed } = fakeIO(['frontend', 'n', 'y', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'frontend')
   const config = JSON.parse(readFileSync(join(dir, 'docugate.json'), 'utf8'))
@@ -78,10 +87,10 @@ test('frontend role: saves role, runs tour init, runs tour install', async () =>
 test('backend role: saves role, skips tour and install, prints skip message', async () => {
   const dir = repo({})
   const bob = fakeBob(dir)
-  // answers: role=backend
-  const { io, printed } = fakeIO(['backend'])
+  // answers: role=backend, sign in=n
+  const { io, printed } = fakeIO(['backend', 'n'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'backend')
   const config = JSON.parse(readFileSync(join(dir, 'docugate.json'), 'utf8'))
@@ -98,10 +107,10 @@ test('both role: runs tour init and tour install', async () => {
   const html = '<html><body></body></html>'
   const dir = repo({ 'index.html': html })
   const bob = fakeBob(dir, { '.docugate/tour/home.md': '---\nroute: /\ntitle: Home\n---\n' })
-  // answers: role=both, run tour=y, run install=y
-  const { io } = fakeIO(['both', 'y', 'y'])
+  // answers: role=both, sign in=n, run tour=y, run install=y
+  const { io } = fakeIO(['both', 'n', 'y', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'both')
   assert.ok(result.tourResult)
@@ -117,10 +126,10 @@ test('second run skips role question when role already in config', async () => {
     'docs/index.md': '# App\n',
   })
   const bob = fakeBob(dir)
-  // no answers needed — role already saved
-  const { io, printed } = fakeIO([])
+  // role already saved; sign in=n
+  const { io, printed } = fakeIO(['n'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'backend')
   // role still backend in config
@@ -137,7 +146,7 @@ test('--yes accepts defaults without asking: role becomes both, tour+install run
   const bob = fakeBob(dir, { '.docugate/tour/home.md': '---\nroute: /\ntitle: Home\n---\n' })
   const { io, printed } = fakeIO([], { isTTY: true })
 
-  const result = await initFlow(dir, { yes: true, io, runBob: bob.runBob })
+  const result = await initFlow(dir, { yes: true, io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'both')
   assert.ok(result.tourResult, 'Bob ran')
@@ -151,7 +160,7 @@ test('--role with --yes uses the provided role', async () => {
   const bob = fakeBob(dir)
   const { io } = fakeIO([], { isTTY: true })
 
-  const result = await initFlow(dir, { yes: true, role: 'backend', io, runBob: bob.runBob })
+  const result = await initFlow(dir, { yes: true, role: 'backend', io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.role, 'backend')
   assert.equal(bob.calls.length, 0)
@@ -182,10 +191,10 @@ test('Bob missing: prints warning, still runs install, finishes with summary', a
   const dir = repo({ 'index.html': html })
   // Bob always reports as missing
   const missing = () => ({ status: 1, stdout: '', stderr: "'bob' is not recognized as an internal or external command," })
-  // answers: role=frontend, run tour=y, run install=y
-  const { io, printed } = fakeIO(['frontend', 'y', 'y'])
+  // answers: role=frontend, sign in=n, run tour=y, run install=y
+  const { io, printed } = fakeIO(['frontend', 'n', 'y', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: missing })
+  const result = await initFlow(dir, { io, runBob: missing, ...NO_AUTH })
 
   assert.ok(result.tourError, 'tourError set')
   assert.ok(printed.some((l) => l.toLowerCase().includes('bob shell')))
@@ -202,10 +211,10 @@ test('Bob generic failure: prints warning with retry hint', async () => {
     if (args[0] === '--version') return { status: 0, stdout: '1.0.0', stderr: '' }
     return { status: 5, stdout: '', stderr: 'Internal error' }
   }
-  // answers: role=frontend, run tour=y, run install=n
-  const { io, printed } = fakeIO(['frontend', 'y', 'n'])
+  // answers: role=frontend, sign in=n, run tour=y, run install=n
+  const { io, printed } = fakeIO(['frontend', 'n', 'y', 'n'])
 
-  const result = await initFlow(dir, { io, runBob: failing })
+  const result = await initFlow(dir, { io, runBob: failing, ...NO_AUTH })
 
   assert.ok(result.tourError)
   assert.ok(printed.some((l) => l.includes('docugate tour init')))
@@ -218,10 +227,10 @@ test('Vite project (index.html at root) gets pill installed during frontend init
   const html = '<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>'
   const dir = repo({ 'index.html': html })
   const bob = fakeBob(dir)
-  // answers: role=frontend, skip tour, run install=y
-  const { io } = fakeIO(['frontend', 'n', 'y'])
+  // answers: role=frontend, sign in=n, skip tour, run install=y
+  const { io } = fakeIO(['frontend', 'n', 'n', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.installResult?.target, 'index.html')
   assert.equal(result.installResult?.action, 'inserted')
@@ -243,10 +252,10 @@ const LAYOUT_TSX = `export default function RootLayout({ children }: { children:
 test('Next.js app router (app/layout.tsx) gets pill installed', async () => {
   const dir = repo({ 'app/layout.tsx': LAYOUT_TSX })
   const bob = fakeBob(dir)
-  // answers: role=frontend, skip tour, run install=y
-  const { io } = fakeIO(['frontend', 'n', 'y'])
+  // answers: role=frontend, sign in=n, skip tour, run install=y
+  const { io } = fakeIO(['frontend', 'n', 'n', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.installResult?.target, 'app/layout.tsx')
   assert.equal(result.installResult?.action, 'inserted')
@@ -275,10 +284,10 @@ export default class MyDocument extends Document {
 test('Next.js pages router (_document.tsx) gets pill installed', async () => {
   const dir = repo({ 'pages/_document.tsx': DOCUMENT_TSX })
   const bob = fakeBob(dir)
-  // answers: role=frontend, skip tour, run install=y
-  const { io } = fakeIO(['frontend', 'n', 'y'])
+  // answers: role=frontend, sign in=n, skip tour, run install=y
+  const { io } = fakeIO(['frontend', 'n', 'n', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.installResult?.target, 'pages/_document.tsx')
   assert.equal(result.installResult?.action, 'inserted')
@@ -291,23 +300,225 @@ test('Next.js pages router (_document.tsx) gets pill installed', async () => {
 test('no HTML found: install reports null and printed line shows pill script', async () => {
   const dir = repo({})
   const bob = fakeBob(dir)
-  // answers: role=frontend, skip tour, run install=y
-  const { io, printed } = fakeIO(['frontend', 'n', 'y'])
+  // answers: role=frontend, sign in=n, skip tour, run install=y
+  const { io, printed } = fakeIO(['frontend', 'n', 'n', 'y'])
 
-  const result = await initFlow(dir, { io, runBob: bob.runBob })
+  const result = await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
 
   assert.equal(result.installResult?.target, null)
   assert.ok(printed.some((l) => l.includes('pill.js')))
 })
 
-// ── sign-in placeholder always printed ───────────────────────────────────────
+// ── step-b: sign in and connect ───────────────────────────────────────────────
 
-test('sign-in coming-soon line is always printed', async () => {
+const SPACES_ONE = { spaces: [{ id: 's1', owner: 'alice', slug: 'my-app', name: 'My App' }] }
+const SPACES_TWO = {
+  spaces: [
+    { id: 's1', owner: 'alice', slug: 'app1', name: 'App One' },
+    { id: 's2', owner: 'alice', slug: 'app2', name: 'App Two' },
+  ],
+}
+const SESSION_ALICE = { user: { githubLogin: 'alice' } }
+
+const FAKE_REMOTE = (_root) => 'acme/my-app'
+
+test('not signed in, TTY, user says yes to sign in: loginFn called, connectFn called', async () => {
   const dir = repo({})
-  // answers: role=backend
+  const bob = fakeBob(dir)
+  const loginCalls = []
+  const connectCalls = []
+  // answers: role=backend, sign in=y, connect=1
+  const { io, printed } = fakeIO(['backend', 'y', '1'])
+
+  await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => ({ user: null }),
+    loginFn: async (url) => { loginCalls.push(url); return { token: 'tok' } },
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async (id, repo, docsDir) => { connectCalls.push({ id, repo, docsDir }) },
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(loginCalls.length, 1)
+  assert.equal(connectCalls.length, 1)
+  assert.equal(connectCalls[0].id, 's1')
+  assert.equal(connectCalls[0].repo, 'acme/my-app')
+  assert.ok(printed.some((l) => l.includes('Signed in to DocuGate')))
+})
+
+test('not signed in, TTY, user says no to sign in: loginFn not called', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  const loginCalls = []
+  // answers: role=backend, sign in=n
+  const { io } = fakeIO(['backend', 'n'])
+
+  const result = await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => ({ user: null }),
+    loginFn: async (url) => { loginCalls.push(url); return { token: 'tok' } },
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async () => {},
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(loginCalls.length, 0)
+  assert.equal(result.connectError, undefined)
+})
+
+test('already signed in: skips sign-in question, goes to spaces', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  const loginCalls = []
+  const connectCalls = []
+  // answers: role=backend, connect=1
+  const { io } = fakeIO(['backend', '1'])
+
+  await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async (url) => { loginCalls.push(url); return { token: 'tok' } },
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async (id, repo, docsDir) => { connectCalls.push({ id, repo, docsDir }) },
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(loginCalls.length, 0, 'login not called when already signed in')
+  assert.equal(connectCalls.length, 1)
+})
+
+test('getSpacesFn throws: prints error and continues to tour steps', async () => {
+  const html = '<html><body></body></html>'
+  const dir = repo({ 'index.html': html })
+  const bob = fakeBob(dir, { '.docugate/tour/home.md': '---\nroute: /\ntitle: Home\n---\n' })
+  // answers: role=frontend, tour=y, install=y  (already signed in — no sign-in question)
+  const { io, printed } = fakeIO(['frontend', 'y', 'y'])
+
+  const result = await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => { throw new Error('network error') },
+    connectFn: async () => {},
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.ok(result.connectError, 'connectError set')
+  assert.ok(result.connectError.includes('network error'))
+  assert.ok(printed.some((l) => l.includes('warning')))
+  // tour steps still ran
+  assert.ok(result.tourResult)
+  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+})
+
+test('no spaces: prints dashboard link and continues', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  // answers: role=backend  (already signed in — no sign-in question)
   const { io, printed } = fakeIO(['backend'])
+  const connectCalls = []
 
-  await initFlow(dir, { io })
+  await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => ({ spaces: [] }),
+    connectFn: async () => { connectCalls.push(1) },
+    getRemoteFn: FAKE_REMOTE,
+    baseUrl: 'https://example.com',
+  })
 
-  assert.ok(printed.some((l) => l.includes('[coming soon]')))
+  assert.equal(connectCalls.length, 0)
+  assert.ok(printed.some((l) => l.includes('example.com/dashboard/new')))
+})
+
+test('connectFn throws pro_required_sources: prints human message and continues', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  // answers: role=backend, connect=1  (already signed in)
+  const { io, printed } = fakeIO(['backend', '1'])
+
+  const result = await initFlow(dir, {
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async () => { throw new Error('Connecting more than one repository to a space needs DocuGate Pro') },
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.ok(result.connectError, 'connectError set')
+  assert.ok(result.connectError.includes('Pro'))
+  assert.ok(printed.some((l) => l.includes('Pro')))
+  // Setup still finished
+  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+})
+
+test('--yes with one space: connects automatically', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  const connectCalls = []
+  const { io } = fakeIO([], { isTTY: true })
+
+  await initFlow(dir, {
+    yes: true,
+    role: 'backend',
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async (id, repo, docsDir) => { connectCalls.push({ id, repo, docsDir }) },
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(connectCalls.length, 1)
+  assert.equal(connectCalls[0].id, 's1')
+})
+
+test('--yes with multiple spaces: skips and prints list', async () => {
+  const dir = repo({})
+  const bob = fakeBob(dir)
+  const connectCalls = []
+  const { io, printed } = fakeIO([], { isTTY: true })
+
+  await initFlow(dir, {
+    yes: true,
+    role: 'backend',
+    io,
+    runBob: bob.runBob,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => SPACES_TWO,
+    connectFn: async (id) => { connectCalls.push(id) },
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(connectCalls.length, 0)
+  assert.ok(printed.some((l) => l.includes('--yes')))
+})
+
+test('CI (no TTY): prints login hint, does not ask about sign-in or spaces', async () => {
+  const dir = repo({})
+  const loginCalls = []
+  const { io, printed } = fakeIO([], { isTTY: false })
+
+  const result = await initFlow(dir, {
+    io,
+    loginFn: async (url) => { loginCalls.push(url); return { token: 'tok' } },
+    getSessionFn: async () => ({ user: null }),
+    getSpacesFn: async () => SPACES_ONE,
+    connectFn: async () => {},
+    getRemoteFn: FAKE_REMOTE,
+  })
+
+  assert.equal(loginCalls.length, 0)
+  assert.equal(result.role, undefined)
+  assert.ok(printed.some((l) => l.includes('docugate login')))
 })

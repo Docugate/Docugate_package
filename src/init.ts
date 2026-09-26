@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { CONFIG_FILE, loadConfig } from './config.js'
@@ -7,6 +8,9 @@ import { tourInit, BobMissingError, BobKeyMissingError } from './tour-init.js'
 import { tourInstall, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import type { TourInitResult } from './tour-init.js'
 import type { TourInstallResult } from './tour-install.js'
+import { login, loadCredentials } from './auth.js'
+import type { LoginOptions } from './auth.js'
+import type { Space } from './api.js'
 
 export type InitResult = { created: string[]; kept: string[]; docsDir: string }
 
@@ -63,6 +67,21 @@ export interface IO {
   print(line: string): void
 }
 
+/** Injectable for tests: replaces the real getSpaces call. */
+export type GetSpacesFn = () => Promise<{ spaces: Space[] }>
+
+/** Injectable for tests: replaces the real connectRepo call. */
+export type ConnectRepoFn = (spaceId: string, repo: string, docsDir: string) => Promise<void>
+
+/** Injectable for tests: replaces the real getSession call. */
+export type GetSessionFn = () => Promise<{ user: { githubLogin: string } | null }>
+
+/** Injectable for tests: replaces the real login call. */
+export type LoginFn = (baseUrl: string, opts?: LoginOptions) => Promise<{ token: string }>
+
+/** Injectable for tests: replaces `git remote get-url origin`. Returns null if no remote. */
+export type GetRemoteFn = (root: string) => string | null
+
 export interface InitFlowOptions {
   dir?: string
   title?: string
@@ -71,6 +90,13 @@ export interface InitFlowOptions {
   port?: number
   io?: IO
   runBob?: RunBob
+  getSessionFn?: GetSessionFn
+  getSpacesFn?: GetSpacesFn
+  connectFn?: ConnectRepoFn
+  loginFn?: LoginFn
+  getRemoteFn?: GetRemoteFn
+  /** Base URL for DocuGate (overrides DOCUGATE_URL env var). */
+  baseUrl?: string
 }
 
 export interface InitFlowResult {
@@ -81,6 +107,7 @@ export interface InitFlowResult {
   tourResult?: TourInitResult
   tourError?: string
   installResult?: TourInstallResult
+  connectError?: string
 }
 
 function makeDefaultIO(): IO {
@@ -118,6 +145,22 @@ function saveRole(root: string, role: Role): void {
 
 const VALID_ROLES = new Set<string>(['frontend', 'backend', 'both'])
 
+function defaultGetRemote(root: string): string | null {
+  try {
+    const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    // Match HTTPS: https://github.com/owner/repo(.git)
+    // Match SSH:   git@github.com:owner/repo(.git)
+    const m = remote.match(/github\.com[:/]([^/]+\/[^/\s]+?)(?:\.git)?$/)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Runs the full interactive DocuGate setup wizard. Asks one short question,
  * saves the result in docugate.json, conditionally runs tour init and tour
@@ -141,6 +184,7 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     if (!io.isTTY) {
       // CI / no terminal: write config without role and explain.
       io.print(`  docugate.json written. Set the repository role with --role frontend|backend|both.`)
+      io.print(`  Run docugate login to connect this repository to a DocuGate space.`)
       // Return early — no tour steps without a known role.
       return { ...base, role: undefined }
     }
@@ -168,8 +212,132 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     saveRole(root, role)
   }
 
-  // ── Step 3: sign-in placeholder ───────────────────────────────────────────
-  io.print(`  [coming soon] Sign in to DocuGate and connect this repository.`)
+  // ── Step 3: sign in and connect this repository ───────────────────────────
+  const BASE_URL = options.baseUrl ?? process.env.DOCUGATE_URL ?? 'https://www.trydocugate.site'
+
+  let connectError: string | undefined
+
+  // In CI (no TTY) skip sign-in entirely (hint already printed in the early-return branch above).
+  if (!io.isTTY) {
+    // nothing more — hint was already printed
+  } else {
+    // Lazily import real API functions only when not overridden by tests.
+    const realGetSession: GetSessionFn = async () => {
+      const { getSession } = await import('./api.js')
+      return getSession()
+    }
+    const realGetSpaces: GetSpacesFn = async () => {
+      const { getSpaces } = await import('./api.js')
+      return getSpaces()
+    }
+    const realConnectRepo: ConnectRepoFn = async (id, repo, dir) => {
+      const { connectRepo } = await import('./api.js')
+      return connectRepo(id, repo, dir)
+    }
+    const realLogin: LoginFn = login
+
+    const getSessionFn = options.getSessionFn ?? realGetSession
+    const getSpacesFn = options.getSpacesFn ?? realGetSpaces
+    const connectFn = options.connectFn ?? realConnectRepo
+    const loginFn = options.loginFn ?? realLogin
+    const getRemoteFn = options.getRemoteFn ?? defaultGetRemote
+
+    // ── 3a: ensure the user is signed in ─────────────────────────────────────
+    let signedIn = false
+    try {
+      // When getSessionFn is injected (tests), trust it directly.
+      // In production, only call it if there are saved credentials.
+      const creds = options.getSessionFn ? true : loadCredentials()
+      if (creds) {
+        const sess = await getSessionFn()
+        signedIn = sess.user !== null
+      }
+    } catch {
+      // can't reach server; treat as not signed in
+    }
+
+    if (!signedIn) {
+      let doLogin = yes
+      if (!yes) {
+        const answer = await io.ask('Sign in to DocuGate now? [Y/n]', 'y')
+        doLogin = !/^n(o)?$/i.test(answer)
+      }
+      if (doLogin) {
+        try {
+          await loginFn(BASE_URL)
+          signedIn = true
+          io.print(`  Signed in to DocuGate.`)
+        } catch (err) {
+          connectError = `Sign-in failed: ${(err as Error).message}`
+          io.print(`  warning  ${connectError}`)
+        }
+      }
+    }
+
+    // ── 3b: connect this repository to a space ────────────────────────────────
+    if (signedIn) {
+      // Read git remote.
+      const repoSlug = getRemoteFn(root)
+
+      if (!repoSlug) {
+        io.print(`  This repository has no GitHub remote yet, so it can't be connected to a space.`)
+      } else {
+        // List spaces.
+        let spaces: Space[] = []
+        try {
+          const res = await getSpacesFn()
+          spaces = res.spaces
+        } catch (err) {
+          connectError = `Couldn't load spaces: ${(err as Error).message}`
+          io.print(`  warning  ${connectError}`)
+        }
+
+        if (spaces.length === 0 && !connectError) {
+          io.print(`  No spaces found. Create one first: ${BASE_URL}/dashboard/new`)
+        } else if (spaces.length > 0) {
+          const { docsDir: repoDocsDir } = loadConfig(root)
+
+          if (yes) {
+            // --yes: auto-connect only when there is exactly one space.
+            if (spaces.length === 1) {
+              try {
+                await connectFn(spaces[0].id, repoSlug, repoDocsDir)
+                io.print(`  Connected ${repoSlug} to space "${spaces[0].name}".`)
+              } catch (err) {
+                connectError = (err as Error).message
+                io.print(`  warning  ${connectError}`)
+              }
+            } else {
+              io.print(`  Multiple spaces found — run docugate init again without --yes to choose:`)
+              for (const s of spaces) io.print(`    ${s.owner}/${s.slug}  ${s.name}`)
+            }
+          } else {
+            // Interactive: list spaces and ask.
+            io.print(`  Your spaces:`)
+            for (let i = 0; i < spaces.length; i++) {
+              io.print(`    ${i + 1}. ${spaces[i].name}  (${spaces[i].owner}/${spaces[i].slug})`)
+            }
+            const answer = await io.ask(
+              `Connect ${repoSlug} to which space? [1-${spaces.length}/skip]`,
+              'skip',
+            )
+            const idx = parseInt(answer, 10) - 1
+            if (!isNaN(idx) && idx >= 0 && idx < spaces.length) {
+              try {
+                await connectFn(spaces[idx].id, repoSlug, repoDocsDir)
+                io.print(`  Connected ${repoSlug} to space "${spaces[idx].name}".`)
+              } catch (err) {
+                connectError = (err as Error).message
+                io.print(`  warning  ${connectError}`)
+              }
+            } else {
+              io.print(`  Skipped connecting to a space.`)
+            }
+          }
+        }
+      }
+    }
+  }
 
   // ── Step 4: tour steps (frontend / both only) ─────────────────────────────
   let tourResult: TourInitResult | undefined
@@ -239,5 +407,5 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
   io.print(``)
   io.print(`Next: docugate tour serve`)
 
-  return { ...base, role, tourResult, tourError, installResult }
+  return { ...base, role, tourResult, tourError, installResult, connectError }
 }
