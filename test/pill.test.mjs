@@ -166,3 +166,20 @@ test('pill/dist/pill.js contains shadow DOM attachment', () => {
   const code = readFileSync(pillPath, 'utf8')
   assert.ok(code.includes('attachShadow'), 'pill.js should use shadow DOM')
 })
+
+// ---------------------------------------------------------------------------
+// nearestCorner — where the badge lands after a drag
+// ---------------------------------------------------------------------------
+
+test('nearestCorner: each quadrant snaps to its own corner', () => {
+  const { nearestCorner } = pillModule
+  assert.equal(nearestCorner(1800, 1000, 1920, 1080), 'bottom-right')
+  assert.equal(nearestCorner(100, 1000, 1920, 1080), 'bottom-left')
+  assert.equal(nearestCorner(1800, 40, 1920, 1080), 'top-right')
+  assert.equal(nearestCorner(100, 40, 1920, 1080), 'top-left')
+})
+
+test('nearestCorner: the exact centre counts as bottom-right', () => {
+  const { nearestCorner } = pillModule
+  assert.equal(nearestCorner(960, 540, 1920, 1080), 'bottom-right')
+})

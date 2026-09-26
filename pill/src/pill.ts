@@ -128,245 +128,229 @@ const STYLES = `
 :host { all: initial; }
 *, *::before, *::after { box-sizing: border-box; }
 
-/* ── pill button ── */
+/* One material for everything the pill draws: near-black glass, a hairline
+   border and a soft shadow, the way the Next.js dev indicator looks. */
+.surface {
+  background: rgba(12, 12, 14, 0.92);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 12px 32px -8px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #ededed;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── the badge ── */
 .pill-btn {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
   z-index: 2147483647;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: #1a1a1a;
-  color: #e8e8e8;
-  border: 1px solid #333;
+  height: 36px;
+  padding: 0 9px;
   border-radius: 999px;
-  font: 12px/1 -apple-system, "Segoe UI", system-ui, sans-serif;
   cursor: pointer;
   user-select: none;
-  letter-spacing: 0.01em;
-  transition: background 0.15s;
+  touch-action: none;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.15s;
 }
-.pill-btn:hover { background: #2a2a2a; }
-.pill-btn:focus-visible { outline: 2px solid #4a90d9; outline-offset: 2px; }
-.pill-dot {
-  width: 6px;
-  height: 6px;
-  background: #4a90d9;
-  border-radius: 50%;
-  flex-shrink: 0;
+.pill-btn.away { opacity: 0; pointer-events: none; transform: scale(0.8); }
+.pill-btn.dragging { cursor: grabbing; transition: none; }
+.pill-btn:hover { background: rgba(24, 24, 28, 0.96); }
+.pill-btn:active:not(.dragging) { transform: scale(0.96); }
+.pill-btn:focus-visible { outline: 2px solid #F4C43F; outline-offset: 3px; }
+.pill-glyph { width: 18px; height: 14px; flex-shrink: 0; display: block; }
+.pill-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  margin-left: 0;
+  transition: max-width 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s, margin 0.28s;
 }
+.pill-btn:hover .pill-label, .pill-btn:focus-visible .pill-label, .pill-btn.open .pill-label {
+  max-width: 220px;
+  opacity: 1;
+  margin-left: 8px;
+}
+.pill-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #F4C43F;
+  color: #10122F;
+  font: 700 10.5px/17px -apple-system, "Segoe UI", system-ui, sans-serif;
+  text-align: center;
+  box-shadow: 0 0 0 2px rgba(12, 12, 14, 0.92);
+}
+.pill-btn.inspecting { box-shadow: 0 0 0 2px #F4C43F, 0 12px 32px -8px rgba(0, 0, 0, 0.55); }
 
-/* ── menu ── */
+/* ── the panel ── */
 .menu {
   position: fixed;
-  bottom: 54px;
-  right: 20px;
   z-index: 2147483647;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
+  width: 288px;
+  border-radius: 12px;
   overflow: hidden;
-  font: 13px/1 -apple-system, "Segoe UI", system-ui, sans-serif;
-  min-width: 170px;
+  transform-origin: var(--origin, bottom right);
+  animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+@keyframes pop { from { opacity: 0; transform: scale(0.96) translateY(var(--rise, 4px)); } }
+.menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.menu-route { font: 12px ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace; color: #a1a1a1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-tag { flex-shrink: 0; font-size: 11px; color: #10122F; background: #F4C43F; border-radius: 999px; padding: 1px 8px; font-weight: 600; }
+.menu-tag.empty { color: #a1a1a1; background: rgba(255, 255, 255, 0.08); }
+.menu-list { padding: 6px; }
 .menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  padding: 10px 14px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
   background: none;
-  border: none;
-  color: #e0e0e0;
+  color: #ededed;
+  font: inherit;
   text-align: left;
   cursor: pointer;
-  font: inherit;
-  transition: background 0.1s;
 }
-.menu-item:hover { background: #2a2a2a; }
-.menu-item:focus-visible { outline: 2px solid #4a90d9; outline-offset: -2px; }
-.menu-item + .menu-item { border-top: 1px solid #2a2a2a; }
-.menu-item.active { color: #4a90d9; }
-.menu-item:disabled { color: #777; cursor: default; background: none; }
-
-/* ── overlay / backdrop ── */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483640;
-  pointer-events: none;
+.menu-item:hover, .menu-item:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+.menu-item:disabled { color: #6e6e6e; cursor: default; background: none; }
+.menu-hint { color: #8f8f8f; font-size: 12px; }
+kbd {
+  font: 11px ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  color: #a1a1a1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0 5px;
 }
-
-/* ── walkthrough card ── */
-.wt-card {
-  position: fixed;
-  z-index: 2147483645;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 10px;
-  padding: 18px 20px 14px;
-  width: 320px;
-  max-width: calc(100vw - 32px);
-  font: 13px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
-  color: #ddd;
-}
-.wt-card-heading {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  margin: 0 0 12px;
-}
-.wt-field {
+.switch { position: relative; width: 28px; height: 16px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); transition: background 0.15s; flex-shrink: 0; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.menu-item[aria-checked="true"] .switch { background: #F4C43F; }
+.menu-item[aria-checked="true"] .switch::after { transform: translateX(12px); background: #10122F; }
+.menu-foot {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-.wt-field-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #666;
-}
-.wt-field-value {
-  font-size: 12px;
-  color: #b0b0b0;
-  word-break: break-all;
-}
-.wt-field-value a {
-  color: #4a90d9;
-  text-decoration: none;
-}
-.wt-field-value a:hover { text-decoration: underline; }
-.wt-prose {
-  font-size: 13px;
-  color: #bbb;
-  margin: 10px 0 14px;
-  line-height: 1.55;
-}
-.wt-nav {
-  display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  padding: 9px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  color: #8f8f8f;
 }
-.wt-btn {
-  padding: 5px 14px;
-  border-radius: 6px;
-  border: 1px solid #444;
-  background: #252525;
-  color: #ddd;
-  font: 12px -apple-system, "Segoe UI", system-ui, sans-serif;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.wt-btn:hover { background: #333; }
-.wt-btn:focus-visible { outline: 2px solid #4a90d9; outline-offset: 2px; }
-.wt-btn.primary {
-  background: #1e4a8a;
-  border-color: #2a5fa0;
-  color: #fff;
-}
-.wt-btn.primary:hover { background: #25559a; }
-.wt-counter {
-  font-size: 11px;
-  color: #555;
-  margin-right: auto;
-  align-self: center;
-}
+.menu-foot .live { display: inline-flex; align-items: center; gap: 6px; }
+.menu-foot .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #45d483; box-shadow: 0 0 0 3px rgba(69, 212, 131, 0.15); }
+.link-btn { border: 0; background: none; color: #a1a1a1; font: inherit; cursor: pointer; padding: 2px 4px; border-radius: 5px; }
+.link-btn:hover, .link-btn:focus-visible { color: #ededed; background: rgba(255, 255, 255, 0.07); outline: none; }
 
-/* ── inspector popup ── */
-.insp-popup {
+/* ── walkthrough card and inspector popup ── */
+.wt-card, .insp-popup {
   position: fixed;
   z-index: 2147483645;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
-  padding: 12px 14px 10px;
-  width: 280px;
+  border-radius: 12px;
+  width: 340px;
   max-width: calc(100vw - 24px);
-  font: 12px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
-  color: #ccc;
+  padding: 16px 16px 12px;
+  animation: pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   pointer-events: auto;
 }
-.insp-popup-heading {
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  margin: 0 0 8px;
+.wt-eyebrow { font-size: 11px; color: #8f8f8f; margin: 0 0 4px; letter-spacing: 0.02em; }
+.wt-card-heading, .insp-popup-heading { font-size: 15px; font-weight: 600; color: #fff; margin: 0 0 6px; letter-spacing: -0.01em; }
+.wt-prose, .insp-popup-prose { font-size: 13px; color: #c7c7c7; margin: 0 0 12px; line-height: 1.55; }
+.wt-prose code, .insp-popup-prose code { font: 12px ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace; color: #f5f0e3; background: rgba(255, 255, 255, 0.08); border-radius: 4px; padding: 1px 5px; }
+.wt-fields {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
-.insp-popup-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 7px;
+.wt-field-label, .insp-popup-label { font-size: 11px; color: #8f8f8f; padding-top: 1px; }
+.wt-field-value, .insp-popup-val { font: 12px/1.45 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace; color: #e4e4e4; overflow-wrap: break-word; }
+.wt-field-value a, .insp-popup-val a { color: #F4C43F; text-decoration: none; }
+.wt-field-value a:hover, .insp-popup-val a:hover { text-decoration: underline; }
+.wt-nav, .insp-popup-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.wt-dots { display: flex; gap: 4px; margin-right: auto; }
+.wt-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); transition: background 0.2s, width 0.2s; }
+.wt-dots i.on { width: 16px; border-radius: 999px; background: #F4C43F; }
+.wt-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #ededed;
+  font: 500 12.5px -apple-system, "Segoe UI", system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
 }
-.insp-popup-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #555;
-}
-.insp-popup-val {
-  font-size: 12px;
-  color: #aaa;
-  word-break: break-all;
-}
-.insp-popup-val a { color: #4a90d9; text-decoration: none; }
-.insp-popup-val a:hover { text-decoration: underline; }
-.insp-popup-prose { font-size: 12px; color: #bbb; margin: 6px 0 10px; }
-.insp-popup-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-}
+.wt-btn:hover { background: rgba(255, 255, 255, 0.09); }
+.wt-btn:focus-visible { outline: 2px solid #F4C43F; outline-offset: 2px; }
+.wt-btn.primary { background: #F4C43F; border-color: #F4C43F; color: #10122F; font-weight: 600; }
+.wt-btn.primary:hover { background: #ffd35c; border-color: #ffd35c; }
 
-/* ── add form ── */
+/* ── add / edit form ── */
 .add-form {
   position: fixed;
   z-index: 2147483646;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 10px;
-  padding: 18px 20px 14px;
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
-  color: #ddd;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border-radius: 14px;
+  padding: 18px 18px 14px;
 }
-.add-form-title { font-size: 14px; font-weight: 600; color: #fff; margin: 0 0 14px; }
-.add-form label { display: block; font-size: 11px; color: #666; margin-bottom: 4px; margin-top: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.add-form-title { font-size: 15px; font-weight: 600; color: #fff; margin: 0 0 12px; }
+.add-form label { display: block; font-size: 11.5px; color: #a1a1a1; margin: 10px 0 4px; }
 .add-form label:first-of-type { margin-top: 0; }
 .add-form input, .add-form textarea {
   width: 100%;
-  background: #111;
-  border: 1px solid #333;
-  border-radius: 5px;
-  color: #ddd;
-  font: 12px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
-  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: #ededed;
+  font: 12.5px/1.4 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  padding: 7px 9px;
   resize: vertical;
 }
-.add-form input:focus, .add-form textarea:focus { outline: 2px solid #4a90d9; border-color: transparent; }
-.add-form textarea { min-height: 60px; }
+.add-form textarea { min-height: 64px; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; }
+.add-form input:focus, .add-form textarea:focus { outline: none; border-color: #F4C43F; box-shadow: 0 0 0 3px rgba(244, 196, 63, 0.18); }
 .add-form-warn {
-  margin-top: 10px;
-  font-size: 11px;
-  color: #c09a40;
-  background: #1e1a0a;
-  border: 1px solid #3a2e0a;
-  border-radius: 5px;
-  padding: 7px 9px;
+  margin-top: 12px;
+  font-size: 12px;
   line-height: 1.5;
+  color: #f1dc9a;
+  background: rgba(244, 196, 63, 0.08);
+  border: 1px solid rgba(244, 196, 63, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
 }
-.add-form-warn code { font-family: monospace; color: #e0b840; }
-.add-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.add-form-warn code { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; color: #F4C43F; }
+.add-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 14px; }
 
-/* ── reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 `
 
@@ -414,7 +398,7 @@ function drawRing(canvas: HTMLCanvasElement, rect: DOMRect): void {
   ctx.restore()
 
   // ring
-  ctx.strokeStyle = '#4a90d9'
+  ctx.strokeStyle = '#F4C43F'
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.moveTo(x + r, y)
@@ -440,7 +424,7 @@ function clearCanvas(canvas: HTMLCanvasElement): void {
 // ---------------------------------------------------------------------------
 
 function positionCard(card: HTMLElement, rect: DOMRect): void {
-  const cw = 320
+  const cw = card.offsetWidth || 340
   const ch = card.offsetHeight || 220
   const vw = window.innerWidth
   const vh = window.innerHeight
@@ -471,9 +455,9 @@ function createHighlightEl(): HTMLElement {
     'position:fixed',
     'pointer-events:none',
     'z-index:2147483642',
-    'border:2px solid #4a90d9',
+    'border:2px solid #F4C43F',
     'border-radius:4px',
-    'background:rgba(74,144,217,0.08)',
+    'background:rgba(244,196,63,0.10)',
     'transition:top 0.06s,left 0.06s,width 0.06s,height 0.06s',
     'display:none',
   ].join(';')
@@ -487,6 +471,65 @@ function moveHighlight(el: HTMLElement, rect: DOMRect): void {
   el.style.width = `${rect.width + 4}px`
   el.style.height = `${rect.height + 4}px`
 }
+
+// ---------------------------------------------------------------------------
+// Text helpers for cards
+// ---------------------------------------------------------------------------
+
+/** Lets a long path wrap after its slashes rather than in the middle of a name. */
+function breakable(text: string): string {
+  return text.replace(/\//g, '/\u200b')
+}
+
+/** Writes prose into `el`, turning `backticked` spans into inline code. Never HTML. */
+function renderProse(el: HTMLElement, prose: string): void {
+  prose.split(/(`[^`]+`)/).forEach((part) => {
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      const code = document.createElement('code')
+      code.textContent = part.slice(1, -1)
+      el.appendChild(code)
+    } else if (part) {
+      el.appendChild(document.createTextNode(part))
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Corners: the badge can be dragged to any of the four, like the Next.js one
+// ---------------------------------------------------------------------------
+
+export type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
+const CORNERS: Corner[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
+const CORNER_KEY = 'docugate-pill-corner'
+const HIDDEN_KEY = 'docugate-pill-hidden'
+const EDGE = 16
+
+/** The corner nearest to a point, for snapping the badge where it is dropped. */
+export function nearestCorner(x: number, y: number, width: number, height: number): Corner {
+  const vertical = y < height / 2 ? 'top' : 'bottom'
+  const horizontal = x < width / 2 ? 'left' : 'right'
+  return `${vertical}-${horizontal}` as Corner
+}
+
+function savedCorner(): Corner {
+  try {
+    const value = localStorage.getItem(CORNER_KEY) as Corner | null
+    return value && CORNERS.includes(value) ? value : 'bottom-right'
+  } catch {
+    return 'bottom-right'
+  }
+}
+
+/** Pins an element to a corner, `offset` px further in from the edge. */
+function pin(el: HTMLElement, corner: Corner, offset = 0): void {
+  const [v, h] = corner.split('-') as ['top' | 'bottom', 'left' | 'right']
+  el.style.top = el.style.bottom = el.style.left = el.style.right = ''
+  el.style[v] = `${EDGE + offset}px`
+  el.style[h] = `${EDGE}px`
+}
+
+/** DocuGate's owl glyph, in cream and gold. */
+const GLYPH = `<svg class="pill-glyph" viewBox="0 0 48 36" aria-hidden="true"><defs><mask id="dg-m" maskUnits="userSpaceOnUse" x="0" y="0" width="48" height="36"><rect width="48" height="36" fill="#fff"/><polygon points="24,19 30.5,25 24,33.5 17.5,25" fill="#000" stroke="#000" stroke-width="3.2" stroke-linejoin="round"/></mask></defs><g transform="translate(-0.9 -2.4)"><g mask="url(#dg-m)"><circle cx="12.5" cy="14" r="9.5" fill="none" stroke="#F5F0E3" stroke-width="4.2"/><circle cx="35.5" cy="14" r="9.5" fill="none" stroke="#F5F0E3" stroke-width="4.2"/><circle cx="14" cy="12.5" r="4.4" fill="#F5F0E3"/><circle cx="37" cy="12.5" r="4.4" fill="#F5F0E3"/></g><polygon points="24,19 24,33.5 17.5,25" fill="#F4C43F"/><polygon points="24,19 30.5,25 24,33.5" fill="#D99A1E"/></g></svg>`
 
 // ---------------------------------------------------------------------------
 // Main Pill class
@@ -515,6 +558,7 @@ class DocugatePill {
   private boundHandleMouseMove: (e: MouseEvent) => void
   private boundHandleClick: (e: MouseEvent) => void
   private isStaticMode = false
+  private corner: Corner = savedCorner()
 
   constructor(base: string) {
     this.base = base
@@ -559,17 +603,76 @@ class DocugatePill {
     this.removePill()
 
     if (!this.alive) return
+    try {
+      if (sessionStorage.getItem(HIDDEN_KEY)) return
+    } catch {
+      // storage blocked: show the pill
+    }
 
+    const stops = this.tour?.stops.length ?? 0
     const btn = document.createElement('button')
-    btn.className = 'pill-btn'
-    btn.setAttribute('aria-label', 'Docugate tour')
-    btn.innerHTML = `<span class="pill-dot"></span>Tour`
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this.toggleMenu()
-    })
+    btn.className = `pill-btn surface${this.inspectorActive ? ' inspecting' : ''}`
+    btn.setAttribute('aria-haspopup', 'menu')
+    btn.setAttribute('aria-expanded', 'false')
+    btn.setAttribute('aria-label', `DocuGate tour: ${stops ? `${stops} stops on this page` : 'no tour on this page yet'}`)
+    btn.innerHTML =
+      GLYPH +
+      `<span class="pill-label">${stops ? `${stops} stop${stops === 1 ? '' : 's'} on this page` : 'No tour on this page yet'}</span>` +
+      (stops ? `<span class="pill-count" aria-hidden="true">${stops}</span>` : '')
+    pin(btn, this.corner)
+    this.makeDraggable(btn)
     this.shadow.appendChild(btn)
     this.pillBtn = btn
+  }
+
+  /**
+   * Click opens the panel; a drag of a few pixels moves the badge instead and
+   * drops it in the nearest corner, which is remembered for next time.
+   */
+  private makeDraggable(btn: HTMLButtonElement): void {
+    let start: { x: number; y: number } | null = null
+    let dragged = false
+
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      start = { x: e.clientX, y: e.clientY }
+      dragged = false
+      btn.setPointerCapture(e.pointerId)
+    })
+    btn.addEventListener('pointermove', (e) => {
+      if (!start) return
+      const dx = e.clientX - start.x
+      const dy = e.clientY - start.y
+      if (!dragged && Math.hypot(dx, dy) < 5) return
+      if (!dragged) {
+        dragged = true
+        this.closeMenu()
+        btn.classList.add('dragging')
+      }
+      btn.style.transform = `translate(${dx}px, ${dy}px)`
+    })
+    btn.addEventListener('pointerup', (e) => {
+      if (!start) return
+      start = null
+      if (!dragged) return
+      btn.classList.remove('dragging')
+      btn.style.transform = ''
+      this.corner = nearestCorner(e.clientX, e.clientY, window.innerWidth, window.innerHeight)
+      try {
+        localStorage.setItem(CORNER_KEY, this.corner)
+      } catch {
+        // not remembered, still moved
+      }
+      pin(btn, this.corner)
+    })
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (dragged) {
+        dragged = false
+        return
+      }
+      this.toggleMenu()
+    })
   }
 
   private removePill(): void {
@@ -590,43 +693,100 @@ class DocugatePill {
 
   private openMenu(): void {
     this.closeMenu()
-    const menu = document.createElement('div')
-    menu.className = 'menu'
-    menu.setAttribute('role', 'menu')
-
-    const walkBtn = document.createElement('button')
-    walkBtn.className = 'menu-item'
     const stops = this.tour?.stops.length ?? 0
-    walkBtn.textContent = stops ? 'Walkthrough' : 'No tour on this page yet'
-    walkBtn.disabled = !stops
-    walkBtn.setAttribute('role', 'menuitem')
-    walkBtn.addEventListener('click', () => { this.closeMenu(); this.startWalkthrough() })
+    const menu = document.createElement('div')
+    menu.className = 'menu surface'
+    menu.setAttribute('role', 'menu')
+    menu.setAttribute('aria-label', 'DocuGate tour')
 
-    const inspBtn = document.createElement('button')
-    inspBtn.className = `menu-item${this.inspectorActive ? ' active' : ''}`
-    inspBtn.textContent = this.inspectorActive ? 'Inspector: on' : 'Inspector'
-    inspBtn.setAttribute('role', 'menuitem')
-    inspBtn.addEventListener('click', () => { this.closeMenu(); this.toggleInspector() })
+    const head = document.createElement('div')
+    head.className = 'menu-head'
+    const route = document.createElement('span')
+    route.className = 'menu-route'
+    route.textContent = this.tour?.route ?? location.pathname
+    const tag = document.createElement('span')
+    tag.className = `menu-tag${stops ? '' : ' empty'}`
+    tag.textContent = stops ? `${stops} stop${stops === 1 ? '' : 's'}` : 'No tour yet'
+    head.append(route, tag)
 
-    menu.appendChild(walkBtn)
-    menu.appendChild(inspBtn)
+    const list = document.createElement('div')
+    list.className = 'menu-list'
+
+    const item = (label: string, right: string, onClick: () => void, disabled = false) => {
+      const b = document.createElement('button')
+      b.className = 'menu-item'
+      b.setAttribute('role', 'menuitem')
+      b.disabled = disabled
+      b.innerHTML = `<span></span>${right}`
+      b.firstElementChild!.textContent = label
+      b.addEventListener('click', () => { this.closeMenu(); onClick() })
+      list.appendChild(b)
+      return b
+    }
+
+    item('Walkthrough', stops ? '<kbd>&#8594;</kbd>' : '<span class="menu-hint">No stops yet</span>', () => this.startWalkthrough(), !stops)
+    const insp = item('Inspector', '<span class="switch" aria-hidden="true"></span>', () => this.toggleInspector())
+    insp.setAttribute('role', 'menuitemcheckbox')
+    insp.setAttribute('aria-checked', String(this.inspectorActive))
+    if (!this.isStaticMode) {
+      item('Add to tour', '<span class="menu-hint">Click an element</span>', () => {
+        if (!this.inspectorActive) this.toggleInspector()
+      })
+    }
+
+    const foot = document.createElement('div')
+    foot.className = 'menu-foot'
+    const status = document.createElement('span')
+    status.className = 'live'
+    status.textContent = this.isStaticMode ? 'Static demo' : this.base.replace(/^https?:\/\//, '')
+    const hide = document.createElement('button')
+    hide.className = 'link-btn'
+    hide.textContent = 'Hide'
+    hide.title = 'Hide until this tab is reloaded'
+    hide.addEventListener('click', () => {
+      try {
+        sessionStorage.setItem(HIDDEN_KEY, '1')
+      } catch {
+        // hidden for now only
+      }
+      if (this.inspectorActive) this.stopInspector()
+      this.removePill()
+    })
+    foot.append(status, hide)
+
+    menu.append(head, list, foot)
+
+    // Open away from the corner the badge sits in.
+    const [v, h] = this.corner.split('-')
+    pin(menu, this.corner, 44)
+    menu.style.setProperty('--origin', `${v} ${h}`)
+    menu.style.setProperty('--rise', v === 'bottom' ? '6px' : '-6px')
+
     this.shadow.appendChild(menu)
     this.menuEl = menu
     this.menuOpen = true
+    this.pillBtn?.classList.add('open')
+    this.pillBtn?.setAttribute('aria-expanded', 'true')
+    ;(list.querySelector('.menu-item:not(:disabled)') as HTMLElement | null)?.focus()
 
-    const close = (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node) && e.target !== this.pillBtn) {
+    const close = (e: Event) => {
+      const inside = e.composedPath().some((n) => n === menu || n === this.pillBtn)
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !inside) {
         this.closeMenu()
         document.removeEventListener('click', close, true)
+        document.removeEventListener('keydown', close, true)
       }
     }
     document.addEventListener('click', close, true)
+    document.addEventListener('keydown', close, true)
   }
 
   private closeMenu(): void {
     this.menuEl?.remove()
     this.menuEl = null
     this.menuOpen = false
+    this.pillBtn?.classList.remove('open')
+    this.pillBtn?.setAttribute('aria-expanded', 'false')
   }
 
   // ── Walkthrough ───────────────────────────────────────────────────────────
@@ -638,6 +798,8 @@ class DocugatePill {
     if (!this.wtStops.length) return
 
     this.walkthroughActive = true
+    // The card needs the corner the badge sits in; it steps aside until Done.
+    this.pillBtn?.classList.add('away')
     this.wtIndex = 0
     this.canvas = createRingCanvas()
     document.body.appendChild(this.canvas)
@@ -661,15 +823,30 @@ class DocugatePill {
 
     this.wtCard?.remove()
     const card = document.createElement('div')
-    card.className = 'wt-card'
+    card.className = 'wt-card surface'
     card.setAttribute('role', 'dialog')
     card.setAttribute('aria-modal', 'true')
     card.setAttribute('aria-label', stop.heading)
+
+    const eyebrow = document.createElement('p')
+    eyebrow.className = 'wt-eyebrow'
+    eyebrow.textContent = `${this.tour?.title ?? 'Tour'} · stop ${this.wtIndex + 1} of ${this.wtStops.length}`
+    card.appendChild(eyebrow)
 
     const heading = document.createElement('h2')
     heading.className = 'wt-card-heading'
     heading.textContent = stop.heading
     card.appendChild(heading)
+
+    if (stop.prose) {
+      const prose = document.createElement('p')
+      prose.className = 'wt-prose'
+      renderProse(prose, stop.prose)
+      card.appendChild(prose)
+    }
+
+    const grid = document.createElement('div')
+    grid.className = 'wt-fields'
 
     const fields: Array<{ label: string; value: string; isLink?: boolean }> = []
     if (stop.data) fields.push({ label: 'Data', value: stop.data })
@@ -678,8 +855,6 @@ class DocugatePill {
     if (stop.docs) fields.push({ label: 'Docs', value: stop.docs, isLink: true })
 
     for (const f of fields) {
-      const row = document.createElement('div')
-      row.className = 'wt-field'
       const lbl = document.createElement('span')
       lbl.className = 'wt-field-label'
       lbl.textContent = f.label
@@ -690,30 +865,23 @@ class DocugatePill {
         a.href = f.value
         a.target = '_blank'
         a.rel = 'noopener noreferrer'
-        a.textContent = f.value
+        a.textContent = breakable(f.value)
         val.appendChild(a)
       } else {
-        val.textContent = f.value
+        val.textContent = breakable(f.value)
       }
-      row.appendChild(lbl)
-      row.appendChild(val)
-      card.appendChild(row)
+      grid.append(lbl, val)
     }
-
-    if (stop.prose) {
-      const prose = document.createElement('p')
-      prose.className = 'wt-prose'
-      prose.textContent = stop.prose
-      card.appendChild(prose)
-    }
+    card.appendChild(grid)
 
     const nav = document.createElement('div')
     nav.className = 'wt-nav'
 
-    const counter = document.createElement('span')
-    counter.className = 'wt-counter'
-    counter.textContent = `${this.wtIndex + 1} / ${this.wtStops.length}`
-    nav.appendChild(counter)
+    const dots = document.createElement('span')
+    dots.className = 'wt-dots'
+    dots.setAttribute('aria-hidden', 'true')
+    dots.innerHTML = this.wtStops.map((_, i) => `<i class="${i === this.wtIndex ? 'on' : ''}"></i>`).join('')
+    nav.appendChild(dots)
 
     if (this.wtIndex > 0) {
       const back = document.createElement('button')
@@ -733,6 +901,7 @@ class DocugatePill {
     card.appendChild(nav)
     this.shadow.appendChild(card)
     this.wtCard = card
+    next.focus()
 
     // Position after appending (needs offsetHeight)
     requestAnimationFrame(() => positionCard(card, rect))
@@ -770,6 +939,7 @@ class DocugatePill {
 
   private stopWalkthrough(): void {
     this.walkthroughActive = false
+    this.pillBtn?.classList.remove('away')
     this.wtCard?.remove()
     this.wtCard = null
     if (this.canvas) {
@@ -792,6 +962,7 @@ class DocugatePill {
 
   private startInspector(): void {
     this.inspectorActive = true
+    this.pillBtn?.classList.add('inspecting')
     this.highlightEl = createHighlightEl()
     document.body.appendChild(this.highlightEl)
     document.addEventListener('mousemove', this.boundHandleMouseMove, true)
@@ -801,6 +972,7 @@ class DocugatePill {
 
   private stopInspector(): void {
     this.inspectorActive = false
+    this.pillBtn?.classList.remove('inspecting')
     document.removeEventListener('mousemove', this.boundHandleMouseMove, true)
     document.removeEventListener('click', this.boundHandleClick, true)
     document.removeEventListener('keydown', this.boundHandleKey)
@@ -853,7 +1025,7 @@ class DocugatePill {
   private showInspPopup(el: HTMLElement, stop: TourStop): void {
     this.closeInspPopup()
     const popup = document.createElement('div')
-    popup.className = 'insp-popup'
+    popup.className = 'insp-popup surface'
     popup.setAttribute('role', 'dialog')
     popup.setAttribute('aria-label', stop.heading)
 
@@ -862,6 +1034,16 @@ class DocugatePill {
     heading.textContent = stop.heading
     popup.appendChild(heading)
 
+    if (stop.prose) {
+      const prose = document.createElement('p')
+      prose.className = 'insp-popup-prose'
+      renderProse(prose, stop.prose)
+      popup.appendChild(prose)
+    }
+
+    const grid = document.createElement('div')
+    grid.className = 'wt-fields'
+
     const rows: Array<{ label: string; value: string; isLink?: boolean }> = []
     if (stop.data) rows.push({ label: 'Data', value: stop.data })
     rows.push({ label: 'Code', value: stop.code })
@@ -869,8 +1051,6 @@ class DocugatePill {
     if (stop.docs) rows.push({ label: 'Docs', value: stop.docs, isLink: true })
 
     for (const r of rows) {
-      const row = document.createElement('div')
-      row.className = 'insp-popup-row'
       const lbl = document.createElement('span')
       lbl.className = 'insp-popup-label'
       lbl.textContent = r.label
@@ -881,22 +1061,14 @@ class DocugatePill {
         a.href = r.value
         a.target = '_blank'
         a.rel = 'noopener noreferrer'
-        a.textContent = r.value
+        a.textContent = breakable(r.value)
         val.appendChild(a)
       } else {
-        val.textContent = r.value
+        val.textContent = breakable(r.value)
       }
-      row.appendChild(lbl)
-      row.appendChild(val)
-      popup.appendChild(row)
+      grid.append(lbl, val)
     }
-
-    if (stop.prose) {
-      const prose = document.createElement('p')
-      prose.className = 'insp-popup-prose'
-      prose.textContent = stop.prose
-      popup.appendChild(prose)
-    }
+    popup.appendChild(grid)
 
     if (!this.isStaticMode) {
       const actions = document.createElement('div')
@@ -931,7 +1103,7 @@ class DocugatePill {
     // Position near element
     const rect = el.getBoundingClientRect()
     popup.style.top = `${Math.min(rect.bottom + 10, window.innerHeight - 200)}px`
-    popup.style.left = `${Math.min(rect.left, window.innerWidth - 296)}px`
+    popup.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 352))}px`
 
     this.shadow.appendChild(popup)
     this.inspPopup = popup
@@ -949,7 +1121,7 @@ class DocugatePill {
     const { selector, needsAttribute } = suggestSelector(el)
 
     const form = document.createElement('div')
-    form.className = 'add-form'
+    form.className = 'add-form surface'
     form.setAttribute('role', 'dialog')
     form.setAttribute('aria-modal', 'true')
     form.setAttribute('aria-label', existing ? 'Edit stop' : 'Add stop')
