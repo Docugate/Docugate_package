@@ -1,0 +1,17 @@
+{
+  "name": "@docugate/pill",
+  "version": "0.1.0",
+  "description": "Docugate in-app tour pill — framework-agnostic, shadow DOM, no dependencies.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/bundle.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2"
+  }
+}

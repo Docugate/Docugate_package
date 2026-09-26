@@ -258,13 +258,15 @@ test('PUT /stop appends a new stop to an existing file', async () => {
 // GET /pill.js
 // ---------------------------------------------------------------------------
 
-test('GET /pill.js returns 404 when pill is not built', async () => {
+test('GET /pill.js serves the built pill script', async () => {
   const root = repo({})
   const server = await startServer(root)
   after(() => server.close())
 
   const res = await get(server.port, '/pill.js')
-  assert.equal(res.status, 404)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers['content-type'], 'application/javascript')
+  assert.ok(res.body.includes('DocugatePill') || res.body.includes('attachShadow'), 'pill.js should contain pill code')
 })
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "pill/dist",
     "README.md",
     "LICENSE"
   ],
@@ -15,7 +16,8 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:pill",
+    "build:pill": "tsc -p pill/tsconfig.json && node pill/scripts/bundle.mjs",
     "test": "npm run build && node --test \"test/*.test.mjs\"",
     "prepublishOnly": "npm test"
   },
