@@ -101,6 +101,9 @@ export interface TourInitResult {
 
 export class BobMissingError extends Error {}
 
+/** Bob Shell's headless mode signs in with an API key, not the IDE's IBMid session. */
+export class BobKeyMissingError extends Error {}
+
 const defaultRunBob: RunBob = (args, cwd) => {
   const result = spawnSync('bob', args, {
     cwd,
@@ -214,6 +217,9 @@ export function tourInit(root: string, options: TourInitOptions = {}): TourInitR
     // prompt does the same job; the snapshot below still protects user files.
     mode = 'agent'
     run = runBob([...common, '--mode', 'agent', buildPrompt([...before.keys()], true)], root)
+  }
+  if (run.status !== 0 && /API key is required|BOB_API_KEY/i.test(run.stderr + run.stdout)) {
+    throw new BobKeyMissingError('Bob Shell needs an API key to run on its own.')
   }
   if (run.status !== 0) {
     const detail = (run.stderr || run.stdout).trim().split(/\r?\n/).slice(-5).join('\n')

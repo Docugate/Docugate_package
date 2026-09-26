@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
-import { BobMissingError, buildPrompt, ensureTourWriter, tourInit } from '../dist/tour-init.js'
+import { BobKeyMissingError, BobMissingError, buildPrompt, ensureTourWriter, tourInit } from '../dist/tour-init.js'
 
 const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url))
 
@@ -117,6 +117,15 @@ test('tour init stops before changing anything when Bob Shell is missing', () =>
   assert.throws(() => tourInit(dir, { runBob: missing }), BobMissingError)
   assert.ok(!existsSync(join(dir, '.bob')))
   assert.ok(!existsSync(join(dir, '.docugate')))
+})
+
+test('tour init explains the API key when Bob Shell asks for one', () => {
+  const dir = repo({})
+  const noKey = (args) =>
+    args[0] === '--version'
+      ? { status: 0, stdout: '2.0.5', stderr: '' }
+      : { status: 1, stdout: '', stderr: 'Error: Bob API key is required. Set BOB_API_KEY environment variable.' }
+  assert.throws(() => tourInit(dir, { runBob: noKey }), BobKeyMissingError)
 })
 
 test('the prompt points at the rules file, or carries the rules itself', () => {

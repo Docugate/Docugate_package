@@ -5,7 +5,7 @@ import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
 import { init } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
-import { BobMissingError, tourInit } from './tour-init.js'
+import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
 
 const SITE = 'https://www.trydocugate.site'
 
@@ -177,6 +177,22 @@ async function main() {
       try {
         result = tourInit(root, { maxCost: one('max-cost'), teamId: one('team-id') })
       } catch (error) {
+        if (error instanceof BobKeyMissingError) {
+          console.error(
+            `${red('error')} Bob Shell needs an API key to run on its own (your IDE sign-in is not used here).
+` +
+              `1. At https://bob.ibm.com, open your instance, then API keys, and create an Inference key.
+` +
+              `2. Save it as the BOB_API_KEY environment variable, then open a new terminal:
+` +
+              `     PowerShell   [Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")
+` +
+              `     macOS/Linux  export BOB_API_KEY=<key>   (add it to your shell profile)
+` +
+              dim('Keep the key out of your repository. https://bob.ibm.com/docs/ide/account/api-keys'),
+          )
+          process.exit(2)
+        }
         if (!(error instanceof BobMissingError)) throw error
         console.error(
           `${red('error')} Bob Shell is not installed, and tours are written by IBM Bob.
