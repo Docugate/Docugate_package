@@ -80,14 +80,17 @@ only.** Tasks 2 to 6 run in this repo.
 > dependencies except `yaml`. Don't add others.
 >
 > 1. `src/tour.ts`: `parseTourFile(text, file)` reads the front matter
->    (`route`, `title`) and each `##` stop's `target`, `data`, `code` and `docs`
->    lines, plus the prose after them. `serializeTourFile(tour)` writes the
+>    (`route`, `title`) and each `##` stop's `target`, `data`, `code`,
+>    `source` (optional: the file where the value is computed) and `docs`
+>    lines, plus the prose after them. Use
+>    `../docugate-demo/.docugate/tour/invoice-detail.md` (written in task 1)
+>    as the reference example. `serializeTourFile(tour)` writes the
 >    same format back, keeping the prose. `loadTours(dir)` reads every `.md`
 >    file in `.docugate/tour/`. `matchRoute(route, pathname)` supports
 >    `:param` segments.
 > 2. Tour checks, run by `docugate check` when `.docugate/tour/` exists, and
 >    reported through the existing `Issue` type as warnings:
->    - the `code` file exists
+>    - the `code` file exists, and so does `source` when given
 >    - the `code` file, or a file it imports (one level deep), contains the
 >      endpoint path from `data` (treat `:id`-style segments as wildcards)
 >    - the `code` file contains the `data-tour` value from `target`
@@ -97,8 +100,8 @@ only.** Tasks 2 to 6 run in this repo.
 >    and each check, using small fixture folders in `test/fixtures/`.
 >
 > Done when `npm test` passes, and running `docugate check` in
-> `examples/invoices` passes, then warns after renaming `invoice-total` in the
-> screen file.
+> `../docugate-demo` passes, then warns after renaming `invoice-total` in
+> `frontend/src/screens/InvoiceDetail.tsx`.
 
 ## Task 3: `docugate tour`, the local server (use Plan mode first)
 
@@ -107,7 +110,7 @@ only.** Tasks 2 to 6 run in this repo.
 > that only listens on `127.0.0.1`, only accepts requests from localhost
 > origins, and only reads and writes inside `.docugate/tour/`:
 >
-> - `GET /tour?path=/invoices/1`: the matching screen and its stops as
+> - `GET /tour?path=/invoices/inv_1004`: the matching screen and its stops as
 >   JSON, or 404.
 > - `GET /events`: server-sent events. Send `change` whenever a file in
 >   `.docugate/tour/` changes (`fs.watch`), so the pill updates live.
@@ -121,8 +124,8 @@ only.** Tasks 2 to 6 run in this repo.
 > JSON file. This is only for a static demo build.
 >
 > Test the endpoints with the server on a random port. Done when `npm test`
-> passes and `curl "localhost:4178/tour?path=/invoices/1"` returns the stops
-> from task 1.
+> passes and `curl "localhost:4178/tour?path=/invoices/inv_1004"`, run while
+> `docugate tour` runs in `../docugate-demo`, returns the stops from task 1.
 
 ## Task 4: the pill and the inspector (use Plan mode first)
 
@@ -155,9 +158,11 @@ only.** Tasks 2 to 6 run in this repo.
 > It re-reads the tour on URL changes (patch `history.pushState` and listen for
 > `popstate`) and on the server's `change` events. Style: dark, system font,
 > hairline borders, small and calm. Keyboard accessible, and respects
-> `prefers-reduced-motion`. Add the script tag to `examples/invoices`.
+> `prefers-reduced-motion`. Add the script tag to
+> `../docugate-demo/frontend/index.html`, and show `source` on the card
+> when a stop has one.
 >
-> Done when the walkthrough runs on `/invoices/1` and closes at the end, the
+> Done when the walkthrough runs on `/invoices/inv_1004` and closes at the end, the
 > inspector explains the total, adding a stop on `/customers` creates
 > `.docugate/tour/customers.md`, and the pill is gone when the server is
 > stopped.
@@ -184,7 +189,7 @@ only.** Tasks 2 to 6 run in this repo.
 > and response types in `src/tour-api.ts` so the server side can match them.
 > Add tests with a fake server.
 >
-> Done when `docugate tour scan --dry-run` in `examples/invoices` lists the
+> Done when `docugate tour scan --dry-run` in `../docugate-demo` lists the
 > right files and no secrets.
 
 ## Task 6: docs
@@ -193,7 +198,8 @@ only.** Tasks 2 to 6 run in this repo.
 > new developers understand an unfamiliar codebase faster), the file format,
 > `docugate tour`, the walkthrough and inspector, `docugate check` for tours,
 > and `docugate tour scan` (AI generation runs on DocuGate's hosted service,
-> so no keys are needed locally). Match the existing README's tone. Add a
-> short `examples/invoices/README.md` on running the demo. No em dashes.
+> so no keys are needed locally). Link the demo app,
+> https://github.com/Docugate/docugate-demo. Match the existing README's tone.
+> No em dashes.
 >
 > Done when a new developer could run the demo from the README alone.
