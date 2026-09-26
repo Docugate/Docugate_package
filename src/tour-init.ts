@@ -65,7 +65,7 @@ The amount due: the subtotal plus tax, computed by \`totals()\` in the backend.
 - Change nothing outside \`${TOUR_DIR}/\`.
 `
 
-const MODE = {
+export const MODE = {
   slug: MODE_SLUG,
   name: '🧭 Tour Writer',
   description: 'Writes DocuGate tour files that explain each screen of an app.',

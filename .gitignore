@@ -15,3 +15,4 @@ ibm-credentials.env
 *.key
 *.p12
 *.pfx
+desktop.ini
