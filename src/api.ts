@@ -49,7 +49,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     } catch {
       // ignore JSON parse failure
     }
-    if (code) throw new Error(friendlyError(code))
+    if (code) throw Object.assign(new Error(friendlyError(code)), { code })
     throw new Error(`DocuGate request failed with status ${res.status}`)
   }
 

@@ -574,3 +574,26 @@ test('CI (no TTY): prints login hint, does not ask about sign-in or spaces', asy
   assert.equal(result.role, undefined)
   assert.ok(printed.some((l) => l.includes('docugate login')))
 })
+
+test('a repository the GitHub App cannot see: offers the install, then creates the space', async () => {
+  const dir = repo({})
+  const opened = []
+  let calls = 0
+  const { io, printed } = fakeIO(['backend', 'create', '1', ''])
+  await initFlow(dir, {
+    io,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => ({ spaces: [] }),
+    createSpaceFn: async (repo, name) => {
+      if (++calls === 1) throw Object.assign(new Error("DocuGate can't see this repository"), { code: 'no_repo_access' })
+      return { name, owner: 'alice', slug: 'app' }
+    },
+    openUrl: (u) => opened.push(u),
+    getRemoteFn: FAKE_REMOTE,
+    baseUrl: 'https://example.com',
+  })
+  assert.equal(calls, 2)
+  assert.ok(opened[0].includes('/api/auth/github?install=1'))
+  assert.ok(printed.some((l) => l.includes('Created space')))
+})

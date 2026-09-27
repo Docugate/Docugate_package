@@ -517,16 +517,31 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
             already ? spaces.indexOf(already) + 2 : 1,
           )
           if (pick === 1) {
-            try {
-              const createFn = options.createSpaceFn ?? (async (repo: string, name: string, dir: string) => {
-                const { createSpace } = await import('./api.js')
-                return createSpace(repo, name, dir)
-              })
-              const created = await createFn(repoSlug, loadConfig(root).config.title ?? repoSlug.split('/')[1], repoDocsDir)
-              io.print(`  Created space "${created.name}": ${BASE_URL}/${created.owner}/${created.slug}`)
-            } catch (err) {
-              connectError = (err as Error).message
-              io.print(`  warning  ${connectError}`)
+            const createFn = options.createSpaceFn ?? (async (repo: string, name: string, dir: string) => {
+              const { createSpace } = await import('./api.js')
+              return createSpace(repo, name, dir)
+            })
+            // A space only ever points at a repository DocuGate can read. A
+            // new one usually is not visible to the GitHub App yet, so offer
+            // the install and try again once, instead of stopping at an error.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const created = await createFn(repoSlug, loadConfig(root).config.title ?? repoSlug.split('/')[1], repoDocsDir)
+                io.print(`  Created space "${created.name}": ${BASE_URL}/${created.owner}/${created.slug}`)
+                connectError = undefined
+                break
+              } catch (err) {
+                connectError = (err as Error).message
+                io.print(`  warning  ${connectError}`)
+                if ((err as { code?: string }).code !== 'no_repo_access' || attempt > 0) break
+                const fix = await choose(io, `The DocuGate GitHub App can't see ${repoSlug} yet.`, [
+                  'Install it on this repository (opens GitHub), then try again',
+                  'Skip for now',
+                ])
+                if (fix !== 1) break
+                ;(options.openUrl ?? openInBrowser)(`${BASE_URL}/api/auth/github?install=1`)
+                await io.ask(`  On GitHub, choose ${repoSlug} (or All repositories) and save. Then press Enter here`, '')
+              }
             }
           } else if (pick <= spaces.length + 1) {
             const sp = spaces[pick - 2]
