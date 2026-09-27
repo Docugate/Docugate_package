@@ -8,28 +8,109 @@ npm i -g docugate
 
 ---
 
-## Quick start
+## Quick start, step by step
 
-`cd` into your app's repository, then run:
+Follow these in order. Every question during setup is a numbered choice: type
+the number and press Enter, or just press Enter for the suggested one.
+
+**1. Install DocuGate, once per computer.**
+
+```sh
+npm i -g docugate
+```
+
+This gives you the `docugate` command in every folder. To pin a version for a
+team instead, run `npm i -D docugate` inside the project and put `npx` in front
+of each command below.
+
+**2. Open your project's folder.**
+
+```sh
+cd my-app
+```
+
+Use the root of the repository: the folder with `.git` in it. If your frontend
+and backend are two repositories, do steps 2 to 4 in each one.
+
+**3. Set everything up.**
 
 ```sh
 docugate init
 ```
 
-It walks you through four steps:
+It asks, one at a time:
 
-1. **Repository role.** Say whether this repository is the frontend, the backend, or both.
-2. **Sign in and connect.** Sign in to DocuGate with GitHub and connect this repository to a space.
-3. **IBM Bob writes the tour.** Bob reads the code and writes one `.docugate/tour/*.md` file for each screen it finds.
-4. **The pill is added to your app.** The dev-only loader snippet is inserted into your HTML or layout file.
+| Question | What to choose |
+| --- | --- |
+| What is in this repository? | **1** Frontend, **2** Backend, or **3** Both (a `frontend/` and a `backend/` folder in one repository). It suggests one from your folders. |
+| Sign in to DocuGate? | **1** opens your browser to sign in with GitHub. You come back to your editor when it is done. **2** skips it; `docugate login` does it later. |
+| Which DocuGate space should document this repository? | **1** creates a new space for it, or pick one of yours. A space already reading this repository is marked. |
+| How often should DocuGate check your docs still match the code? | On every push, daily (suggested, fewer AI runs), weekly, or never. |
+| Set up the tour: which AI should write it? | **1** IBM Bob reads your code and writes the tour. **2** IBM watsonx is coming soon. **3** skips it; you can write the tour in the browser. Frontend and both only. |
+| Add the DocuGate pill to your app? | **1** adds a few lines to your `index.html` or Next.js layout that load the pill in development only. |
+| Start the tour server now? | **1** starts it, so the pill shows right away. |
 
-Once that is done:
+The first time you choose IBM Bob, setup opens the page where you create a Bob
+API key and asks you to paste it. It is kept in `~/.docugate/bob.json` on your
+computer and never written into the repository.
+
+Setup writes `docugate.json` and `.docugate/tour/`. Commit both, so the next
+person who clones the repository needs no setup.
+
+**4. Start the tour server while you work.**
 
 ```sh
 docugate tour serve
 ```
 
-Start your app in another terminal, open it in the browser, and the pill appears in the corner.
+Leave it running in its own terminal. The pill only appears while it runs,
+which is why the pill never shows in production. If you started it at the end
+of step 3, it is already running.
+
+**5. Run your app as usual, in another terminal, and open it.**
+
+```sh
+npm run dev
+```
+
+The DocuGate pill sits in the bottom-right corner. Click it:
+
+- **Walkthrough** lists the page's steps with your progress. Click a step to
+  go to it, the pencil to fix it, or **Add a step**.
+- **Inspector** is one switch. With it on, click anything: you see what it is
+  and where its data comes from, and you can edit it. Click something with no
+  explanation yet, and the same click lets you add one.
+
+Every change is saved straight into `.docugate/tour/`, so it shows up in `git diff`.
+
+**6. Keep the tour true.**
+
+```sh
+docugate check
+```
+
+It checks every step against the code and warns about any that went stale,
+for example after a rename. Put it in CI so a stale tour fails the build (see
+[Keeping tours true](#keeping-tours-true)).
+
+**Later, when you need them:**
+
+```sh
+docugate login           # sign in again, or on a new computer
+docugate whoami          # who am I signed in as?
+docugate tour init       # let IBM Bob write tours for screens that have none
+docugate tour install    # add the pill again (--remove takes it out)
+docugate logout          # disconnect this computer
+```
+
+**Something not working?**
+
+| You see | Do this |
+| --- | --- |
+| No pill in the app | Check `docugate tour serve` is running, then refresh the page. |
+| Bob can't run | Choose IBM Bob again in `docugate init` to paste a key, or install Bob Shell: https://bob.ibm.com/docs/shell/getting-started/install-and-setup |
+| Port 4178 is busy | `docugate tour serve --port 4179` and `docugate tour install --port 4179` |
+| "Already set up in ..." | You ran it in a subfolder. Run commands from the folder it names. |
 
 ---
 
@@ -73,14 +154,24 @@ Tour files are yours. `docugate tour init` never overwrites a file that already 
 
 ## The pill
 
-When `docugate tour serve` is running, the pill appears in the corner of your app. It has two modes:
+When `docugate tour serve` is running, the pill sits in a corner of your app,
+like the Next.js dev indicator. Drag it to any corner. Click it for two things:
 
-- **Walkthrough.** Steps through every stop on the current screen in order, highlighting each element and showing its tour card.
-- **Inspector.** Hovering highlights an element; clicking it shows its stop: what it is and where its data comes from. An element with no stop yet offers **Add to tour**, a small form that saves the stop straight into the tour file, and tells you which `data-tour` attribute to add when the element has none.
+- **Walkthrough.** The page's steps as a checklist with progress. Start from
+  any step: the page dims, a ring marks the element, and a card says what it
+  is and where its data comes from. Each step has a pencil to fix it, and
+  **Add a step** adds one.
+- **Inspector.** One switch. With it on, clicking an element shows its step,
+  with **Edit** to correct what the AI or anyone else got wrong, and **Remove**.
+  Clicking an element with no step lets you add it, and tells you which
+  `data-tour` attribute to put on it. Code and source files open in your
+  editor at the element's line.
 
-The pill stays on every page while the server runs, including pages with no tour yet, so their first stop can be added from the browser. Edits to the tour files show up on the page as you save them.
+The pill shows on every page while the server runs, including pages with no
+tour yet, so their first step can be added from the browser.
 
-`docugate tour install` adds the pill for you. It only loads when the app runs on `localhost` and the tour server answers, so it never shows in production.
+`docugate tour install` adds the pill for you. It only loads when the app runs
+on `localhost` and the tour server answers, so it never shows in production.
 
 ---
 
@@ -163,6 +254,8 @@ docugate tour serve
 ```
 
 Open the app in the browser. The pill appears in the bottom-right corner.
+
+Or try it without installing anything: https://docugate-demo.vercel.app/invoices/inv_1004. The hosted demo reads a copy of the tour, so editing is turned off there.
 
 ---
 
