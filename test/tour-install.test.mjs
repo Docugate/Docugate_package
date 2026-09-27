@@ -186,3 +186,32 @@ test('install uses the specified port in the snippet URL', () => {
   const text = readFileSync(join(dir, 'index.html'), 'utf8')
   assert.ok(text.includes('localhost:3333/pill.js'))
 })
+
+// ---------------------------------------------------------------------------
+// The tour server starts with the app: a predev (or prestart) script
+// ---------------------------------------------------------------------------
+
+test('install adds predev so npm run dev starts the tour server, once', async () => {
+  const { installStartHook, SERVE_HOOK } = await import('../dist/tour-install.js')
+  const dir = mkdtempSync(join(tmpdir(), 'docugate-hook-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'app', scripts: { dev: 'vite' } }, null, 2) + '\n')
+  assert.deepEqual(installStartHook(dir), { hook: 'predev', action: 'inserted' })
+  assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts.predev, SERVE_HOOK)
+  assert.equal(installStartHook(dir).action, 'already')
+  assert.equal(installStartHook(dir, { remove: true }).action, 'removed')
+  assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts.predev, undefined)
+})
+
+test('an existing predev keeps running first; npm start apps get prestart', async () => {
+  const { installStartHook, SERVE_HOOK } = await import('../dist/tour-install.js')
+  const dir = mkdtempSync(join(tmpdir(), 'docugate-hook-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'next dev', predev: 'node gen.js' } }))
+  installStartHook(dir)
+  assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts.predev, `node gen.js && ${SERVE_HOOK}`)
+  installStartHook(dir, { remove: true })
+  assert.equal(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts.predev, 'node gen.js')
+
+  const cra = mkdtempSync(join(tmpdir(), 'docugate-hook-'))
+  writeFileSync(join(cra, 'package.json'), JSON.stringify({ scripts: { start: 'react-scripts start' } }))
+  assert.equal(installStartHook(cra).hook, 'prestart')
+})

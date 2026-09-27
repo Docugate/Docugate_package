@@ -271,7 +271,9 @@ async function askForBobKey(io: IO, openUrl?: (url: string) => void): Promise<bo
     return false
   }
   useBobKeyForThisRun(key)
-  io.print('  Using the key for this run only. To keep it for next time, set it in your environment:')
+  // Say it arrived, without showing it: the last four characters and the length.
+  io.print(`  ${green('✓')} Key received (…${key.slice(-4)}, ${key.length} characters). Using it for this run only.`)
+  io.print('  To keep it for next time, set it in your environment:')
   io.print(process.platform === 'win32'
     ? '    [Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")   (then open a new terminal)'
     : '    export BOB_API_KEY=<key>   (add it to your shell profile)')
@@ -646,13 +648,13 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
       try {
         tourResult = tourInit(root, { runBob: options.runBob })
         stop()
-        io.print(`  IBM Bob wrote the tour.`)
+        io.print(`  ${green('✓')} IBM Bob wrote the tour (${tourResult.added.length} screen${tourResult.added.length === 1 ? '' : 's'}).`)
       } catch (error) {
         stop()
         // Bob missing or failed — describe what went wrong, then continue.
         if (error instanceof BobKeyMissingError) {
           tourError =
-            `IBM Bob did not accept the key. Check BOB_API_KEY holds an Inference key from bob.ibm.com, then run docugate tour init.`
+            `✗ IBM Bob did not accept this key. Check it is an Inference key from bob.ibm.com, then run docugate tour init.`
         } else if (error instanceof BobMissingError) {
           tourError =
             `Bob Shell is not installed. Install it, sign in, then run docugate tour init.`
@@ -713,6 +715,7 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
   if (role !== 'backend') {
     rows.push(['Tour', tourResult ? `IBM Bob wrote ${tourResult.added.length} screen${tourResult.added.length === 1 ? '' : 's'}` : 'add steps in the browser'])
     rows.push(['Tour button', hasPill && installResult?.target ? installResult.target : 'not added'])
+    if (installResult?.hook) rows.push(['Starts with', `npm run ${installResult.hook.replace(/^pre/, '')}`])
   }
   io.print(``)
   io.print(`  ${dimmed('╭')} ${bold('DocuGate setup')}`)
@@ -725,7 +728,8 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     io.print(`  ${green('✓')} ${bold('DocuGate is set up for this backend.')}`)
   } else if (hasPill) {
     io.print(`  ${green('✓')} ${bold('DocuGate is set up.')}`)
-    io.print(`    Start your project as usual (for example ${gold('npm run dev')}) and open it:`)
+    const run = installResult?.hook ? `npm run ${installResult.hook.replace(/^pre/, '')}` : 'npm run dev'
+    io.print(`    Start your project as usual (${gold(run)}) and open it:`)
     io.print(`    the ${gold('Tour')} button is in the bottom-right corner.`)
   } else {
     io.print(`  ${green('✓')} ${bold('DocuGate is set up.')} Run docugate tour install to add the Tour button to your app.`)

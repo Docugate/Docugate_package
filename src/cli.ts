@@ -290,6 +290,8 @@ async function main() {
             // already / no-op
             console.log(`  ${dim('unchanged')}  ${result.target}`)
           }
+          if (result.hookAction === 'inserted') console.log(`  ${green('installed')}  package.json ${dim(`(${result.hook}: the tour server starts with your app)`)}`)
+          if (result.hookAction === 'removed') console.log(`  ${green('removed')}    package.json ${dim(`(${result.hook})`)}`)
           return
         }
 
@@ -347,7 +349,16 @@ ${dim(`Bob: ${parts.join(', ')}`)}`)
         }
 
         case 'serve': {
-          await serveTour(root, parseInt(one('port') ?? '4178', 10))
+          const port = parseInt(one('port') ?? '4178', 10)
+          if (args.bools.has('background')) {
+            // Run from the app's predev script: start (or reuse) the server,
+            // say so in one line, and hand the terminal back to the app.
+            mkdirSync(join(root, '.docugate', 'tour'), { recursive: true })
+            const up = await startServerInBackground(root, port)
+            console.log(up ? `${green('DocuGate')} tour ready on port ${port}` : `${yellow('DocuGate')} could not start the tour server. Run docugate tour serve to see why.`)
+            return
+          }
+          await serveTour(root, port)
           return
         }
 

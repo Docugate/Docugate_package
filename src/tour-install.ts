@@ -38,6 +38,57 @@ export type TourInstallResult = {
   /** The file that was (or would be) modified; null when nothing was found. */
   target: string | null
   action: 'inserted' | 'removed' | 'already' | 'none'
+  /** The npm script that now starts the tour server with the app, e.g. predev. */
+  hook?: string
+  hookAction?: 'inserted' | 'removed' | 'already' | 'none'
+}
+
+/** What the app's own start script runs first, so the tour server comes up with it. */
+export const SERVE_HOOK = 'docugate tour serve --background'
+
+/**
+ * Adds `docugate tour serve --background` as the `predev` script (or
+ * `prestart`, for apps started with npm start), so running the project the
+ * usual way also starts the tour server. npm runs pre-scripts by itself, on
+ * every platform. An existing pre-script keeps running first. Only this
+ * repository's package.json, and only its scripts, are touched.
+ */
+export function installStartHook(root: string, options: TourInstallOptions = {}): { hook?: string; action: TourInstallResult['action'] } {
+  const path = join(root, 'package.json')
+  if (!existsSync(path)) return { action: 'none' }
+  const text = readFileSync(path, 'utf8')
+  let pkg: { scripts?: Record<string, string> }
+  try {
+    pkg = JSON.parse(text)
+  } catch {
+    return { action: 'none' }
+  }
+  const scripts = pkg.scripts ?? {}
+  const base = scripts.dev ? 'dev' : scripts.start ? 'start' : null
+  if (!base) return { action: 'none' }
+  const hook = `pre${base}`
+  const port = options.port ?? DEFAULT_PORT
+  const command = port === DEFAULT_PORT ? SERVE_HOOK : `${SERVE_HOOK} --port ${port}`
+  const existing = scripts[hook]
+
+  if (options.remove) {
+    if (!existing?.includes(SERVE_HOOK)) return { hook, action: 'already' }
+    const rest = existing
+      .split('&&')
+      .map((part) => part.trim())
+      .filter((part) => !part.startsWith(SERVE_HOOK))
+      .join(' && ')
+    if (rest) scripts[hook] = rest
+    else delete scripts[hook]
+  } else {
+    if (existing?.includes(SERVE_HOOK)) return { hook, action: 'already' }
+    scripts[hook] = existing ? `${existing} && ${command}` : command
+  }
+  pkg.scripts = scripts
+  const indent = text.match(/^[ \t]+(?=")/m)?.[0] ?? '  '
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  writeFileSync(path, JSON.stringify(pkg, null, indent).replace(/\n/g, eol) + eol)
+  return { hook, action: options.remove ? 'removed' : 'inserted' }
 }
 
 /** Returns true if any candidate file already contains the pill snippet. */
@@ -115,6 +166,12 @@ function removeSnippet(text: string, open: string, close: string): string {
  * already present is a no-op.
  */
 export function tourInstall(root: string, options: TourInstallOptions = {}): TourInstallResult {
+  const result = installSnippet(root, options)
+  const started = installStartHook(root, options)
+  return { ...result, hook: started.hook, hookAction: started.action }
+}
+
+function installSnippet(root: string, options: TourInstallOptions): TourInstallResult {
   const port = options.port ?? DEFAULT_PORT
   const remove = options.remove ?? false
 
