@@ -1,8 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { isMap, isSeq, parseDocument } from 'yaml'
 
 // `docugate tour init` writes the first tour of an app by asking IBM Bob
@@ -105,31 +104,22 @@ export class BobMissingError extends Error {}
 /** Bob Shell's headless mode signs in with an API key, not the IDE's IBMid session. */
 export class BobKeyMissingError extends Error {}
 
-/** Where `docugate init` keeps the Bob API key: the home folder, never the repository. */
-export function bobKeyPath(): string {
-  return join(homedir(), '.docugate', 'bob.json')
-}
-
-/** The Bob API key: BOB_API_KEY if set, else the one saved during setup. */
+/**
+ * The Bob API key comes from the environment only: BOB_API_KEY. DocuGate never
+ * writes it anywhere. A key pasted during setup is put in this process's
+ * environment for that one run, and is gone when the command ends.
+ */
 export function readBobKey(): string | undefined {
-  if (process.env.BOB_API_KEY) return process.env.BOB_API_KEY
-  try {
-    return (JSON.parse(readFileSync(bobKeyPath(), 'utf8')) as { key?: string }).key || undefined
-  } catch {
-    return undefined
-  }
+  return process.env.BOB_API_KEY || undefined
 }
 
-export function saveBobKey(key: string): void {
-  mkdirSync(dirname(bobKeyPath()), { recursive: true })
-  writeFileSync(bobKeyPath(), JSON.stringify({ key }) + '\n', { mode: 0o600 })
+export function useBobKeyForThisRun(key: string): void {
+  process.env.BOB_API_KEY = key
 }
 
 const defaultRunBob: RunBob = (args, cwd) => {
-  const key = readBobKey()
   const result = spawnSync('bob', args, {
     cwd,
-    env: key ? { ...process.env, BOB_API_KEY: key } : process.env,
     encoding: 'utf8',
     // `bob` is a .cmd shim on Windows, which only runs through a shell.
     shell: process.platform === 'win32',

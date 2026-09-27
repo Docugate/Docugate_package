@@ -50,9 +50,14 @@ It asks, one at a time:
 | Add the DocuGate pill to your app? | **1** adds a few lines to your `index.html` or Next.js layout that load the pill in development only. |
 | Start the tour server now? | **1** starts it, so the pill shows right away. |
 
-The first time you choose IBM Bob, setup opens the page where you create a Bob
-API key and asks you to paste it. It is kept in `~/.docugate/bob.json` on your
-computer and never written into the repository.
+IBM Bob reads its API key from the `BOB_API_KEY` environment variable. If it is
+not set, setup opens the page where you create a key and lets you paste it for
+that one run; DocuGate never saves it. To set it for good (then open a new terminal):
+
+```powershell
+[Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")   # Windows
+export BOB_API_KEY=<key>                                                # macOS, Linux
+```
 
 Setup writes `docugate.json` and `.docugate/tour/`. Commit both, so the next
 person who clones the repository needs no setup.

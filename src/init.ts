@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, dirname, join } from 'node:path'
 import { CONFIG_FILE, loadConfig } from './config.js'
 import type { RunBob } from './tour-init.js'
-import { tourInit, BobMissingError, BobKeyMissingError, readBobKey, saveBobKey } from './tour-init.js'
+import { tourInit, BobMissingError, BobKeyMissingError, readBobKey, useBobKeyForThisRun } from './tour-init.js'
 import { tourInstall, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import type { TourInitResult } from './tour-init.js'
 import type { TourInstallResult } from './tour-install.js'
@@ -169,26 +169,29 @@ function saveSetting(root: string, key: string, value: unknown): void {
 const BOB_KEYS_URL = 'https://bob.ibm.com/docs/ide/account/api-keys'
 
 /**
- * Bob Shell runs on its own with an API key, not the IDE sign-in. Setup gets
- * one without anyone editing environment variables: open the page that makes
- * it, paste it, and it is kept in ~/.docugate/bob.json, outside the repository.
+ * Bob Shell runs on its own with an API key, not the IDE sign-in, and reads it
+ * from BOB_API_KEY. When that is not set, setup can take a pasted key for this
+ * one run only: DocuGate never stores it, and says how to set it for good.
  */
 async function askForBobKey(io: IO, openUrl?: (url: string) => void): Promise<boolean> {
-  const pick = await choose(io, 'IBM Bob needs an API key to write the tour. Get one now?', [
-    'Yes, open the page to create an Inference key, then paste it here',
+  const pick = await choose(io, 'IBM Bob needs an API key (BOB_API_KEY is not set in your environment).', [
+    'Paste a key for this run only (opens the page that creates one)',
     'Skip the tour for now',
   ])
   if (pick !== 1) return false
   io.print(`  In your Bob instance: API keys, then create an Inference key.`)
   io.print(`  ${BOB_KEYS_URL}`)
   ;(openUrl ?? openInBrowser)(BOB_KEYS_URL)
-  const key = (await io.ask('  Paste the key and press Enter (it stays on this computer)', '')).trim()
+  const key = (await io.ask('  Paste the key and press Enter (used for this run only, never saved)', '')).trim()
   if (!key) {
     io.print('  No key pasted. Skipped the tour: run docugate tour init when you have one.')
     return false
   }
-  saveBobKey(key)
-  io.print('  Key saved in ~/.docugate/bob.json. It is never written into the repository.')
+  useBobKeyForThisRun(key)
+  io.print('  Using the key for this run only. To keep it for next time, set it in your environment:')
+  io.print(process.platform === 'win32'
+    ? '    [Environment]::SetEnvironmentVariable("BOB_API_KEY", "<key>", "User")   (then open a new terminal)'
+    : '    export BOB_API_KEY=<key>   (add it to your shell profile)')
   return true
 }
 
