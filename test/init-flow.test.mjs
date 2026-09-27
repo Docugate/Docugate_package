@@ -108,7 +108,7 @@ test('frontend role: saves role, runs tour init, runs tour install', async () =>
   assert.ok(result.tourResult.added.length > 0, 'tour files added')
   assert.ok(result.installResult, 'installResult set')
   assert.equal(result.installResult.action, 'inserted')
-  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+  assert.ok(printed.some((l) => l.includes('DocuGate is set up')))
 })
 
 // ── backend role ──────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ test('--yes accepts defaults without asking: role becomes both, tour+install run
   assert.ok(result.tourResult, 'Bob ran')
   assert.ok(result.installResult, 'install ran')
   assert.equal(result.installResult.action, 'inserted')
-  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+  assert.ok(printed.some((l) => l.includes('DocuGate is set up')))
 })
 
 test('--role with --yes uses the provided role', async () => {
@@ -231,7 +231,7 @@ test('Bob missing: prints warning, still runs install, finishes with summary', a
   assert.ok(result.installResult)
   assert.equal(result.installResult.action, 'inserted')
   // summary printed
-  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+  assert.ok(printed.some((l) => l.includes('DocuGate is set up')))
 })
 
 test('Bob generic failure: prints warning with retry hint', async () => {
@@ -441,7 +441,7 @@ test('getSpacesFn throws: prints error and continues to tour steps', async () =>
   assert.ok(printed.some((l) => l.includes('warning')))
   // tour steps still ran
   assert.ok(result.tourResult)
-  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+  assert.ok(printed.some((l) => l.includes('DocuGate is set up')))
 })
 
 test('no spaces: offers to create one, and creates it', async () => {
@@ -513,7 +513,7 @@ test('connectFn throws pro_required_sources: prints human message and continues'
   assert.ok(result.connectError.includes('Pro'))
   assert.ok(printed.some((l) => l.includes('Pro')))
   // Setup still finished
-  assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
+  assert.ok(printed.some((l) => l.includes('DocuGate is set up')))
 })
 
 test('--yes with one space: connects automatically', async () => {

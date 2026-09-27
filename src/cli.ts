@@ -1,10 +1,11 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { check } from './check.js'
 import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
-import { choose, initFlow, makeDefaultIO } from './init.js'
+import { initFlow } from './init.js'
 import type { Role } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
 import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
@@ -209,17 +210,16 @@ async function main() {
         yes: args.bools.has('yes'),
         port,
       })
-      // The pill only shows while the tour server runs, so setup ends by
-      // offering to start it rather than leaving one more command to remember.
+      // The Tour button only shows while the tour server runs, so setup starts
+      // it in the background instead of asking: the next thing the person
+      // does is open their app, and the button is there.
       const where = result.alreadySetUp ?? root
       const hasTour = result.role === 'frontend' || result.role === 'both'
-      if (hasTour && process.stdin.isTTY && !args.bools.has('yes')) {
-        const io = makeDefaultIO()
-        const pick = await choose(io, 'Start the tour server now, so the pill shows in your app?', [
-          'Yes, start it (leave this terminal open, then run your app as usual)',
-          'Later: docugate tour serve',
-        ])
-        if (pick === 1) await serveTour(where, port)
+      if (hasTour && !args.bools.has('no-serve')) {
+        const started = await startServerInBackground(where, port)
+        console.log(dim(started
+          ? `    The tour server is running in the background (port ${port}). After a restart: docugate tour serve`
+          : `    Start the tour server with docugate tour serve, then open your app.`))
       }
       return
     }
@@ -375,6 +375,35 @@ main().catch((error: Error) => {
   console.error(`${red('error')} ${error.message}`)
   process.exit(1)
 })
+
+/**
+ * Starts `docugate tour serve` detached, so it outlives this command. When one
+ * is already answering on the port, that one is kept. True when a server is
+ * answering afterwards.
+ */
+async function startServerInBackground(root: string, port: number): Promise<boolean> {
+  const answering = async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/pill.js`, { signal: AbortSignal.timeout(800) })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+  if (await answering()) return true
+  const child = spawn(process.execPath, [process.argv[1], 'tour', 'serve', '--port', String(port)], {
+    cwd: root,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  child.unref()
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 150))
+    if (await answering()) return true
+  }
+  return false
+}
 
 /**
  * Serves the tour to the pill until Ctrl-C. Starts even when there is no tour

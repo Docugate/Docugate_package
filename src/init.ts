@@ -213,7 +213,7 @@ async function createDocsSpace(
       ])
       if (fix !== 1) return undefined
       ;(options.openUrl ?? openInBrowser)(`${baseUrl}/api/auth/github?install=1`)
-      await io.ask(`  On GitHub, add ${repo.repo} (or choose All repositories) and save. Then press Enter here`, '')
+      await io.ask(`  On GitHub, add ${repo.repo} (or choose All repositories) and save. Then press Enter here:`, '')
     }
   }
   return undefined
@@ -265,7 +265,7 @@ async function askForBobKey(io: IO, openUrl?: (url: string) => void): Promise<bo
   io.print(`  In your Bob instance: API keys, then create an Inference key.`)
   io.print(`  ${BOB_KEYS_URL}`)
   ;(openUrl ?? openInBrowser)(BOB_KEYS_URL)
-  const key = (await (io.askSecret ?? io.ask)('  Paste the key and press Enter (hidden, used for this run only, never saved)', '')).trim()
+  const key = (await (io.askSecret ?? io.ask)('  Paste the key and press Enter (hidden, used for this run only, never saved):', '')).trim()
   if (!key) {
     io.print('  No key pasted. Skipped the tour: run docugate tour init when you have one.')
     return false
@@ -332,16 +332,38 @@ export function guessRole(root: string): Role | undefined {
   return undefined
 }
 
+// ── Look ───────────────────────────────────────────────────────────────────
+// Color only in a real terminal, and never when NO_COLOR is set, so logs and
+// CI stay plain text.
+const colorOn = () => Boolean(process.stdout.isTTY) && !process.env.NO_COLOR
+const paint = (code: string) => (text: string) => (colorOn() ? `\x1b[${code}m${text}\x1b[0m` : text)
+const bold = paint('1')
+const dimmed = paint('2')
+const gold = paint('38;2;244;196;63')
+const cream = paint('38;2;245;240;227')
+const green = paint('32')
+
+/** DocuGate's owl, drawn small: cream eyes, gold beak. */
+export function banner(): string[] {
+  return [
+    '',
+    `   ${dimmed('╭─────╮')}`,
+    `   ${dimmed('│')} ${cream('◉ ◉')} ${dimmed('│')}   ${bold('DocuGate')}`,
+    `   ${dimmed('│')}  ${gold('▾')}  ${dimmed('│')}   ${dimmed('Tours and docs for your codebase')}`,
+    `   ${dimmed('╰─────╯')}`,
+  ]
+}
+
 /**
  * A numbered choice: prints the options, and takes only a number. Enter picks
  * the default. Nobody types a word during setup.
  */
 export async function choose(io: IO, question: string, options: string[], fallback = 1): Promise<number> {
   io.print('')
-  io.print(`  ${question}`)
-  options.forEach((option, i) => io.print(`    ${i + 1}  ${option}`))
+  io.print(`  ${bold(question)}`)
+  options.forEach((option, i) => io.print(`    ${gold(String(i + 1))}  ${option}`))
   for (;;) {
-    const answer = (await io.ask(`  Choose 1-${options.length} [${fallback}]`, String(fallback))).trim()
+    const answer = (await io.ask(`  ${dimmed(`Choose 1-${options.length} [${fallback}]`)}:`, String(fallback))).trim()
     const n = Number(answer)
     if (Number.isInteger(n) && n >= 1 && n <= options.length) return n
     io.print(`  Type a number from 1 to ${options.length}.`)
@@ -377,6 +399,8 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
   // One project gets one setup and one tour. Run inside frontend/ of a
   // project already set up at its root, and init points there instead of
   // starting a second one.
+  if (io.isTTY) for (const line of banner()) io.print(line)
+
   const parent = setUpAbove(root)
   if (parent) {
     io.print(`  This project is already set up in ${parent}.`)
@@ -678,8 +702,34 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
   if (installResult?.action === 'inserted') io.print(`  installed pill in ${installResult.target}`)
   if (installResult?.action === 'already') io.print(`  pill already in ${installResult.target}`)
 
+  const hasPill = installResult?.action === 'inserted' || installResult?.action === 'already'
+  const final = loadConfig(root).config
+  const freshness = FRESHNESS.find((f) => f.value === final.freshness)
+  const rows: Array<[string, string]> = [
+    ['Repository', role ? role.charAt(0).toUpperCase() + role.slice(1) : 'not set'],
+    ['Docs', final.space ?? 'no space yet'],
+    ['Checks', freshness ? freshness.label.split(' (')[0] : 'not set'],
+  ]
+  if (role !== 'backend') {
+    rows.push(['Tour', tourResult ? `IBM Bob wrote ${tourResult.added.length} screen${tourResult.added.length === 1 ? '' : 's'}` : 'add steps in the browser'])
+    rows.push(['Tour button', hasPill && installResult?.target ? installResult.target : 'not added'])
+  }
   io.print(``)
-  io.print(`Next: docugate tour serve`)
+  io.print(`  ${dimmed('╭')} ${bold('DocuGate setup')}`)
+  rows.forEach(([label, value], i) => {
+    const branch = i === rows.length - 1 ? '╰' : '├'
+    io.print(`  ${dimmed(branch)} ${label.padEnd(12)} ${green(value)}`)
+  })
+  io.print(``)
+  if (role === 'backend') {
+    io.print(`  ${green('✓')} ${bold('DocuGate is set up for this backend.')}`)
+  } else if (hasPill) {
+    io.print(`  ${green('✓')} ${bold('DocuGate is set up.')}`)
+    io.print(`    Start your project as usual (for example ${gold('npm run dev')}) and open it:`)
+    io.print(`    the ${gold('Tour')} button is in the bottom-right corner.`)
+  } else {
+    io.print(`  ${green('✓')} ${bold('DocuGate is set up.')} Run docugate tour install to add the Tour button to your app.`)
+  }
 
   return { ...base, role, tourResult, tourError, installResult, connectError }
 }
