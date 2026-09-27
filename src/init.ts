@@ -100,6 +100,8 @@ export interface InitFlowOptions {
   createSpaceFn?: (repo: string, name: string, docsDir: string) => Promise<{ name: string; owner: string; slug: string }>
   /** Puts the project on GitHub when it has no remote; injectable for tests. */
   createRepoFn?: (root: string, io: IO) => Promise<string | null>
+  /** The DocuGate call that creates the empty repository; injectable for tests. */
+  createGitHubRepoFn?: CreateRepoFn
   /** Opens a URL in the browser; injectable for tests. */
   openUrl?: (url: string) => void
 }
@@ -265,6 +267,8 @@ export async function choose(io: IO, question: string, options: string[], fallba
   }
 }
 
+type CreateRepoFn = (name: string, isPrivate: boolean) => Promise<{ repo: string; url: string; cloneUrl: string }>
+
 function run(cmd: string, args: string[], cwd: string): { ok: boolean; out: string } {
   try {
     const out = execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' })
@@ -281,18 +285,13 @@ function run(cmd: string, args: string[], cwd: string): { ok: boolean; out: stri
  * and push the code to it. Returns owner/name, or null when skipped or failed.
  * DocuGate's own GitHub sign-in is not given the right to create repositories.
  */
-async function createGitHubRepo(root: string, io: IO): Promise<string | null> {
+async function createGitHubRepo(root: string, io: IO, create?: CreateRepoFn): Promise<string | null> {
   const pick = await choose(io, 'This project is not on GitHub yet, and a space reads from a GitHub repository.', [
-    'Create a GitHub repository for it now (uses the GitHub CLI)',
+    'Create a GitHub repository for it now, and push this code to it',
     'Skip for now',
   ])
   if (pick !== 1) return null
 
-  if (!run('gh', ['auth', 'status'], root).ok) {
-    io.print('  The GitHub CLI is not installed or not signed in.')
-    io.print('  Install it from https://cli.github.com, run gh auth login, then docugate init again.')
-    return null
-  }
   if (!run('git', ['rev-parse', 'HEAD'], root).ok) {
     io.print('  Commit your code first (git add -A, then git commit), then run docugate init again.')
     return null
@@ -302,13 +301,45 @@ async function createGitHubRepo(root: string, io: IO): Promise<string | null> {
     'Private (a space from a private repository needs DocuGate Pro)',
   ])
   const name = basename(root).replace(/[^A-Za-z0-9._-]+/g, '-')
-  const made = run('gh', ['repo', 'create', name, visibility === 1 ? '--public' : '--private', '--source', '.', '--remote', 'origin', '--push'], root)
+  const isPrivate = visibility === 2
+
+  // DocuGate creates it as the person, through its GitHub App. An App that has
+  // not been given the permission yet falls through to the GitHub CLI.
+  try {
+    const made = await (create ?? (async (n: string, priv: boolean) => {
+      const { createRepo } = await import('./api.js')
+      return createRepo(n, priv)
+    }))(name, isPrivate)
+    if (!run('git', ['remote', 'add', 'origin', made.cloneUrl], root).ok) {
+      run('git', ['remote', 'set-url', 'origin', made.cloneUrl], root)
+    }
+    const pushed = run('git', ['push', '-u', 'origin', 'HEAD'], root)
+    if (!pushed.ok) {
+      io.print(`  Created ${made.url}, but the push failed: ${pushed.out.split(/\r?\n/).pop()}`)
+      io.print('  Push it yourself with git push -u origin HEAD, then run docugate init again.')
+      return null
+    }
+    io.print(`  Created ${made.url} and pushed your code.`)
+    return made.repo
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'app_permission') {
+      io.print(`  Could not create the repository: ${(err as Error).message}`)
+      return null
+    }
+  }
+
+  if (!run('gh', ['auth', 'status'], root).ok) {
+    io.print("  DocuGate can't create repositories on your account yet, and the GitHub CLI is not signed in.")
+    io.print('  Create the repository on github.com, push this code to it, then run docugate init again.')
+    return null
+  }
+  const made = run('gh', ['repo', 'create', name, isPrivate ? '--private' : '--public', '--source', '.', '--remote', 'origin', '--push'], root)
   if (!made.ok) {
     io.print(`  Could not create the repository: ${made.out.split(/\r?\n/).pop()}`)
     return null
   }
   const slug = defaultGetRemote(root)
-  if (slug) io.print(`  Created https://github.com/${slug} and pushed your code.`)
+  if (slug) io.print(`  Created https://github.com/${slug} with the GitHub CLI and pushed your code.`)
   return slug
 }
 
@@ -466,7 +497,9 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
       // Read git remote; a project not on GitHub yet can be put there first.
       let repoSlug = getRemoteFn(root)
       if (!repoSlug && !yes) {
-        repoSlug = await (options.createRepoFn ?? createGitHubRepo)(root, io)
+        repoSlug = options.createRepoFn
+          ? await options.createRepoFn(root, io)
+          : await createGitHubRepo(root, io, options.createGitHubRepoFn)
       }
 
       if (!repoSlug) {

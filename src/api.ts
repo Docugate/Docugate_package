@@ -9,6 +9,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   pro_required: 'Private repositories need DocuGate Pro',
   no_repo_access: "DocuGate can't see this repository. Install the DocuGate GitHub App on it first",
   slug_taken: 'You already have a space with this name',
+  repo_exists: 'You already have a repository with this name on GitHub',
+  app_permission: "DocuGate's GitHub App has not been allowed to create repositories yet",
   github_required: 'Sign in with GitHub to create a space',
 }
 
@@ -100,6 +102,15 @@ export async function createSpace(repo: string, name: string, docsDir: string): 
     body: JSON.stringify({ repo, name, docsDir }),
   })
   return ((await res.json()) as { space: Space }).space
+}
+
+/** Creates an empty repository on the person's GitHub account, as them. */
+export async function createRepo(name: string, isPrivate: boolean): Promise<{ repo: string; url: string; cloneUrl: string }> {
+  const res = await apiFetch('/api/repos', {
+    method: 'POST',
+    body: JSON.stringify({ name, private: isPrivate }),
+  })
+  return (await res.json()) as { repo: string; url: string; cloneUrl: string }
 }
 
 export async function connectRepo(spaceId: string, repo: string, docsDir: string): Promise<void> {

@@ -597,3 +597,30 @@ test('a repository the GitHub App cannot see: offers the install, then creates t
   assert.ok(opened[0].includes('/api/auth/github?install=1'))
   assert.ok(printed.some((l) => l.includes('Created space')))
 })
+
+test('no GitHub repository yet: DocuGate creates one, the code is pushed, then the space is made', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const dir = repo({ 'index.html': '<html><body></body></html>' })
+  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q'); git('add', '-A'); git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'first')
+  const bare = mkdtempSync(join(tmpdir(), 'docugate-remote-'))
+  execFileSync('git', ['init', '-q', '--bare', bare])
+  const createdSpaces = []
+  // answers: role=backend, create repo=1, public=1, space=create
+  const { io, printed } = fakeIO(['backend', '1', '1', 'create'])
+  await initFlow(dir, {
+    io,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => ({ spaces: [] }),
+    getRemoteFn: () => null,
+    createGitHubRepoFn: async (name) => ({ repo: `alice/${name}`, url: `https://github.com/alice/${name}`, cloneUrl: bare }),
+    createSpaceFn: async (repo, name) => { createdSpaces.push(repo); return { name, owner: 'alice', slug: 'app' } },
+    baseUrl: 'https://example.com',
+  })
+  const pushed = execFileSync('git', ['--git-dir', bare, 'log', '--oneline'], { encoding: 'utf8' })
+  assert.match(pushed, /first/, 'the commit reached the new repository')
+  assert.equal(createdSpaces.length, 1)
+  assert.match(createdSpaces[0], /^alice\//)
+  assert.ok(printed.some((l) => l.includes('pushed your code')))
+})
