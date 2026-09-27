@@ -67,6 +67,8 @@ export interface IO {
   isTTY: boolean
   ask(question: string, defaultAnswer: string): Promise<string>
   print(line: string): void
+  /** Like ask, without echoing what is typed: for keys. */
+  askSecret?(question: string, defaultAnswer: string): Promise<string>
 }
 
 /** Injectable for tests: replaces the real getSpaces call. */
@@ -128,6 +130,21 @@ export function makeDefaultIO(): IO {
         const rl = createInterface({ input: process.stdin, output: process.stdout })
         rl.question(`${question} `, (answer) => {
           rl.close()
+          resolve(answer.trim() || defaultAnswer)
+        })
+      })
+    },
+    askSecret(question, defaultAnswer) {
+      // Keys must never be shown on screen, where screenshots and recordings
+      // pick them up: print the question, then echo nothing while typing.
+      return new Promise((resolve) => {
+        const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true })
+        const muted = rl as unknown as { _writeToOutput: (s: string) => void }
+        process.stdout.write(`${question} `)
+        muted._writeToOutput = () => undefined
+        rl.question('', (answer) => {
+          rl.close()
+          process.stdout.write('[hidden]\n')
           resolve(answer.trim() || defaultAnswer)
         })
       })
@@ -248,7 +265,7 @@ async function askForBobKey(io: IO, openUrl?: (url: string) => void): Promise<bo
   io.print(`  In your Bob instance: API keys, then create an Inference key.`)
   io.print(`  ${BOB_KEYS_URL}`)
   ;(openUrl ?? openInBrowser)(BOB_KEYS_URL)
-  const key = (await io.ask('  Paste the key and press Enter (used for this run only, never saved)', '')).trim()
+  const key = (await (io.askSecret ?? io.ask)('  Paste the key and press Enter (hidden, used for this run only, never saved)', '')).trim()
   if (!key) {
     io.print('  No key pasted. Skipped the tour: run docugate tour init when you have one.')
     return false
@@ -570,7 +587,7 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
         'IBM Bob (uses Bobcoins)',
         'IBM watsonx (coming soon)',
         'Skip, I will write it in the browser',
-      ], 3)
+      ])
       if (pick === 2) io.print('  IBM watsonx is coming soon. Skipped for now: run docugate tour init when you are ready.')
       runTour = pick === 1
       if (runTour && !readBobKey() && !options.runBob) {
@@ -616,7 +633,9 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
           tourError =
             `Bob Shell is not installed. Install it, sign in, then run docugate tour init.`
         } else {
-          tourError = `Tour init failed: ${(error as Error).message}. Run docugate tour init to retry.`
+          // One calm line; the technical detail only when asked for.
+          tourError = `IBM Bob couldn't write the tour this time. The pill still works: add steps in the browser, or run docugate tour init later.`
+          if (process.env.DOCUGATE_DEBUG) io.print(`  detail  ${(error as Error).message}`)
         }
         io.print(`  warning  ${tourError}`)
       }

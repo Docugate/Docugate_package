@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { isMap, isSeq, parseDocument } from 'yaml'
 
 // `docugate tour init` writes the first tour of an app by asking IBM Bob
@@ -117,14 +117,35 @@ export function useBobKeyForThisRun(key: string): void {
   process.env.BOB_API_KEY = key
 }
 
+/**
+ * On Windows, `bob` is an npm .cmd shim, and a .cmd only runs through cmd.exe,
+ * which splits a path at its spaces ("C:\Users\GUSENGA Thierry") and cannot
+ * carry the prompt's line breaks. The shim only starts Node on Bob Shell's
+ * script, so run that script with Node directly: no shell, nothing mangled.
+ */
+export function bobScript(pathEnv = process.env.PATH ?? ''): string | undefined {
+  for (const dir of pathEnv.split(';').filter(Boolean)) {
+    const shim = join(dir, 'bob.cmd')
+    if (!existsSync(shim)) continue
+    const match = readFileSync(shim, 'utf8').match(/"%dp0%\\([^"]+\.js)"/)
+    if (!match) continue
+    const script = join(dir, match[1])
+    if (existsSync(script)) return script
+  }
+  return undefined
+}
+
 const defaultRunBob: RunBob = (args, cwd) => {
-  const result = spawnSync('bob', args, {
-    cwd,
-    encoding: 'utf8',
-    // `bob` is a .cmd shim on Windows, which only runs through a shell.
-    shell: process.platform === 'win32',
-    maxBuffer: 64 * 1024 * 1024,
-  })
+  const script = process.platform === 'win32' ? bobScript() : undefined
+  const result = script
+    ? spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    : spawnSync('bob', args, {
+        cwd,
+        encoding: 'utf8',
+        // No shim script found on Windows: fall back to the shell.
+        shell: process.platform === 'win32',
+        maxBuffer: 64 * 1024 * 1024,
+      })
   if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
     throw new BobMissingError('Bob Shell is not installed.')
   }
