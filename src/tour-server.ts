@@ -394,6 +394,18 @@ export function startTourServer(root: string, port: number): Promise<TourServer>
         })
       } else if (req.method === 'GET' && path === '/pill.js') {
         handleGetPill(res)
+      } else if (req.method === 'GET' && path === '/') {
+        // Somebody opened the tour server itself. Say what it is and where to go.
+        const screens = loadTours(root).length
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>DocuGate tour server</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0F1014;color:#F5F0E3;font:15px/1.6 system-ui,sans-serif}
+main{max-width:440px;padding:32px;border:1px solid #25273a;border-radius:16px;background:#15173a}
+h1{font-size:20px;margin:0 0 8px}p{margin:0 0 12px;color:#aaa597}b{color:#F4C43F;font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#45d483;margin-right:8px}</style></head>
+<body><main><h1><span class="dot"></span>The DocuGate tour server is running</h1>
+<p>This is not a page to open. It feeds the Tour button in your app (${screens} screen${screens === 1 ? '' : 's'} in <b>.docugate/tour/</b>).</p>
+<p>Open <b>your app</b> instead, for example <b>http://localhost:5173</b> or <b>http://localhost:3000</b>. The Tour button is in the bottom-right corner.</p></main></body></html>`)
       } else {
         sendText(res, 404, 'Not found')
       }
