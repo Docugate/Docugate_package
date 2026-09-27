@@ -81,6 +81,29 @@ export function suggestSelector(el: Element): { selector: string; needsAttribute
   return { selector: `[data-tour="${tag}"]`, needsAttribute: true }
 }
 
+/**
+ * A CSS selector that finds exactly this element today, for one with no
+ * data-tour attribute yet: its id if it has one, else the tag and position
+ * from the nearest ancestor with an id, or from the body.
+ */
+export function uniqueSelector(el: Element): string {
+  if (el.id) return `#${CSS.escape(el.id)}`
+  const parts: string[] = []
+  let node: Element | null = el
+  while (node && node !== document.body && node !== document.documentElement) {
+    if (node.id) {
+      parts.unshift(`#${CSS.escape(node.id)}`)
+      break
+    }
+    const tag = node.tagName.toLowerCase()
+    const siblings = node.parentElement ? Array.from(node.parentElement.children).filter((c) => c.tagName === node!.tagName) : []
+    parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(node) + 1})` : tag)
+    node = node.parentElement
+  }
+  if (!parts[0]?.startsWith('#')) parts.unshift('body')
+  return parts.join(' > ')
+}
+
 // ---------------------------------------------------------------------------
 // Server URL: read from this script's own src attribute
 // ---------------------------------------------------------------------------
@@ -415,10 +438,12 @@ kbd {
 .step-edit svg { width: 15px; height: 15px; }
 .step-row:hover .step-edit, .step-edit:focus-visible { opacity: 1; }
 .step-edit:hover { color: #F4C43F; background: rgba(255, 255, 255, 0.07); }
-.step-edit:disabled { display: none; }
+.step-row .step:disabled + .step-edit { opacity: 1; color: #F4C43F; }
 .add-step { color: #a1a1a1; }
 .add-step .num { border-style: dashed; font-size: 14px; font-weight: 400; }
 .add-step:hover { background: rgba(255, 255, 255, 0.06); color: #ededed; }
+.wt-start { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 34px; margin: 4px 0 2px; }
+.wt-start svg { width: 13px; height: 13px; }
 .wt-empty { margin: 4px 8px 6px; font-size: 12.5px; line-height: 1.5; color: #a1a1a1; }
 .item-text { display: flex; flex-direction: column; gap: 1px; }
 .menu-list { border-top: 1px solid rgba(255, 255, 255, 0.07); }
@@ -636,6 +661,9 @@ class DocugatePill {
   private inspEl: HTMLElement | null = null
   private inspectedPath = location.pathname
   private listCollapsed = false
+  private retarget: TourStop | null = null
+  /** When a re-attached step is saved, the target it had before. */
+  private editingFrom: string | null = null
   private highlightEl: HTMLElement | null = null
   private evtSource: EventSource | null = null
   private boundHandleKey: (e: KeyboardEvent) => void
@@ -840,6 +868,26 @@ class DocugatePill {
     section.appendChild(head)
     if (this.listCollapsed) return section
 
+    const playable = stops.filter((st) => document.querySelector(st.target) !== null)
+    if (playable.length) {
+      const allSeen = playable.every((st) => seen.has(st.target))
+      const resume = playable.find((st) => !seen.has(st.target))
+      const start = document.createElement('button')
+      start.className = 'wt-btn primary wt-start'
+      start.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z" fill="currentColor"/></svg><span></span>`
+      start.querySelector('span')!.textContent = allSeen
+        ? 'Watch again'
+        : done && resume
+          ? `Continue from step ${stops.indexOf(resume) + 1}`
+          : 'Start walkthrough'
+      start.addEventListener('click', () => {
+        this.closeMenu()
+        if (allSeen) this.resetVisited()
+        this.startWalkthrough(allSeen ? undefined : resume)
+      })
+      section.appendChild(start)
+    }
+
     const list = document.createElement('div')
     list.className = 'steps'
     stops.forEach((stop, i) => {
@@ -866,11 +914,18 @@ class DocugatePill {
         edit.className = 'step-edit'
         edit.setAttribute('aria-label', `Edit step ${i + 1}, ${stop.heading}`)
         edit.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5l2 2L6 12H4v-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`
-        edit.disabled = !onPage
+        if (!onPage) edit.setAttribute('aria-label', `Point step ${i + 1}, ${stop.heading}, at an element`)
         edit.addEventListener('click', () => {
           const el = document.querySelector(stop.target) as HTMLElement | null
           this.closeMenu()
-          if (el) this.showInspPopup(el, stop, true)
+          if (el) {
+            this.showInspPopup(el, stop, true)
+            return
+          }
+          // The step points at nothing on this page: the next click picks its element.
+          this.retarget = stop
+          if (!this.inspectorActive) this.toggleInspector()
+          this.toast(`Click the element "${stop.heading}" should point to.`)
         })
         row.appendChild(edit)
       }
@@ -951,6 +1006,14 @@ class DocugatePill {
       return new Set(JSON.parse(sessionStorage.getItem(`docugate-seen:${this.tour?.route ?? location.pathname}`) ?? '[]'))
     } catch {
       return new Set()
+    }
+  }
+
+  private resetVisited(): void {
+    try {
+      sessionStorage.removeItem(`docugate-seen:${this.tour?.route ?? location.pathname}`)
+    } catch {
+      // nothing remembered, nothing to reset
     }
   }
 
@@ -1199,6 +1262,16 @@ class DocugatePill {
     e.preventDefault()
     e.stopPropagation()
 
+    if (this.retarget) {
+      // Re-attach a step whose element was missing: same step, this element.
+      const old = this.retarget
+      this.retarget = null
+      const { selector, needsAttribute } = suggestSelector(el)
+      this.showInspPopup(el as HTMLElement, { ...old, target: needsAttribute ? uniqueSelector(el) : selector }, true)
+      this.editingFrom = old.target
+      return
+    }
+
     const stop = this.findStopForElement(el)
     if (stop) {
       this.showInspPopup(el as HTMLElement, stop)
@@ -1228,7 +1301,9 @@ class DocugatePill {
    * With no stop, it opens as the form for a new one.
    */
   private showInspPopup(el: HTMLElement, stop: TourStop | null, editing = false): void {
+    const from = this.editingFrom
     this.closeInspPopup()
+    this.editingFrom = from
     const panel = document.createElement('div')
     panel.className = 'insp-popup surface'
     panel.setAttribute('role', 'dialog')
@@ -1344,10 +1419,10 @@ class DocugatePill {
       { key: 'heading', label: 'Name', value: existing?.heading ?? '', placeholder: 'e.g. Total' },
       { key: 'prose', label: 'What it is', value: existing?.prose ?? '', multi: true, placeholder: 'e.g. The amount due: the subtotal plus tax, computed by `totals()`.' },
       { key: 'data', label: 'Data', value: existing?.data ?? '', placeholder: 'e.g. GET /api/invoices/:id → total' },
-      { key: 'code', label: 'Code file', value: existing?.code ?? '', placeholder: 'e.g. src/screens/Invoice.tsx' },
+      { key: 'code', label: 'File that shows it', value: existing?.code ?? '', placeholder: 'A path in your repository, e.g. src/pages/Home.tsx' },
       { key: 'source', label: 'Source file', value: existing?.source ?? '', placeholder: 'Optional: where the value is computed' },
       { key: 'docs', label: 'Docs link', value: existing?.docs ?? '', placeholder: 'Optional' },
-      { key: 'target', label: 'Selector', value: existing?.target ?? selector },
+      { key: 'target', label: 'Selector', value: existing?.target ?? (needsAttribute ? uniqueSelector(el) : selector) },
     ]
     const inputs = {} as Record<keyof TourStop, HTMLInputElement | HTMLTextAreaElement>
     const form = document.createElement('form')
@@ -1369,11 +1444,24 @@ class DocugatePill {
     if (needsAttribute && !existing) {
       const warn = document.createElement('div')
       warn.className = 'add-form-warn'
-      warn.append('Add ')
+      const slug = tourValue(selector) ?? ''
       const code = document.createElement('code')
-      code.textContent = `data-tour="${tourValue(selector) ?? ''}"`
-      warn.append(code, ' to this element in your code, so the stop keeps finding it.')
+      code.textContent = `data-tour="${slug}"`
+      const sel = document.createElement('code')
+      sel.textContent = selector
+      warn.append('This works now. To keep it working after a redesign, add ', code, ' to the element in your code, then set Selector to ', sel, '.')
       form.appendChild(warn)
+    }
+
+    // Fill in the file for them: the tour server knows which file has this data-tour.
+    const value = tourValue(existing?.target ?? selector)
+    if (!this.isStaticMode && !inputs.code.value && value && !needsAttribute) {
+      fetch(`${this.base}/find?value=${encodeURIComponent(value)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((found: { path?: string } | null) => {
+          if (found?.path && !inputs.code.value) inputs.code.value = found.path
+        })
+        .catch(() => undefined)
     }
 
     const error = document.createElement('p')
@@ -1433,14 +1521,20 @@ class DocugatePill {
         docs: value('docs') || undefined,
         prose: value('prose'),
       }
-      const missing = !stop.heading ? 'a name' : !stop.code ? 'the code file' : !stop.target ? 'a selector' : ''
+      const missing = !stop.heading ? 'a name' : !stop.code ? 'the file that shows it' : !stop.target ? 'a selector' : ''
       if (missing) {
         error.textContent = `Add ${missing} first.`
         error.hidden = false
         return
       }
+      if (/^[a-z]+:\/\/|^localhost/i.test(stop.code)) {
+        error.textContent = 'The file is a path in your repository, like src/pages/Home.tsx, not the page address.'
+        error.hidden = false
+        return
+      }
       save.disabled = true
-      const saved = await this.saveStop(stop, existing?.target)
+      const saved = await this.saveStop(stop, this.editingFrom ?? existing?.target)
+      this.editingFrom = null
       save.disabled = false
       if (!saved) {
         error.textContent = 'Could not save. Is docugate tour serve still running?'
@@ -1472,6 +1566,7 @@ class DocugatePill {
     this.inspPopup?.remove()
     this.inspPopup = null
     this.inspEl = null
+    this.editingFrom = null
   }
 
   private showAddForm(el: HTMLElement, existing?: TourStop): void {

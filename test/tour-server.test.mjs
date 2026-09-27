@@ -480,3 +480,10 @@ test('lineOf finds the element, and editorCommand follows the editor', async () 
   assert.equal(editorCommand({ VSCODE_GIT_ASKPASS_NODE: 'C:/Program Files/cursor/Cursor.exe' }), 'cursor')
   assert.equal(editorCommand({}), 'code')
 })
+
+test('findTourFile finds the file that renders a data-tour value', async () => {
+  const { findTourFile } = await import('../dist/tour-server.js')
+  const root = tempTourCheckRepo()
+  assert.equal(findTourFile(root, 'invoice-total'), 'frontend/src/screens/InvoiceDetail.tsx')
+  assert.equal(findTourFile(root, 'nothing-has-this'), undefined)
+})

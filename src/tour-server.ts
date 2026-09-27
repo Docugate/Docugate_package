@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { existsSync, mkdirSync, readFileSync, realpathSync, watch, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, watch, writeFileSync } from 'node:fs'
 import { join, relative, resolve, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadTours, matchRoute, parseTourFile, routeToFilename, serializeTourFile } from './tour.js'
@@ -196,6 +196,49 @@ async function handlePutStop(req: IncomingMessage, res: ServerResponse, root: st
   sendJson(res, 200, { ok: true })
 }
 
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.docugate', '.bob', 'coverage', '.vercel'])
+const CODE_FILE = /\.(tsx|jsx|ts|js|vue|svelte|html|astro)$/
+
+/**
+ * The repository file that renders an element with this data-tour value, so
+ * the pill fills in "the file that shows it" instead of asking. A file with
+ * data-tour="value" wins over one that only passes the value along as a prop.
+ */
+export function findTourFile(root: string, value: string): string | undefined {
+  const exact = new RegExp(`data-tour=["']${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`)
+  const quoted = new RegExp(`["']${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`)
+  let fallback: string | undefined
+  let seen = 0
+  const walk = (dir: string): string | undefined => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (++seen > 20000) return undefined
+      const abs = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+        const found = walk(abs)
+        if (found) return found
+      } else if (CODE_FILE.test(entry.name)) {
+        const text = readFileSync(abs, 'utf8')
+        const rel = relative(root, abs).split('\\').join('/')
+        if (exact.test(text)) return rel
+        if (!fallback && quoted.test(text)) fallback = rel
+      }
+    }
+    return undefined
+  }
+  return walk(root) ?? fallback
+}
+
+function handleFind(req: IncomingMessage, res: ServerResponse, root: string): void {
+  const value = new URL(req.url ?? '/', 'http://localhost').searchParams.get('value') ?? ''
+  const path = value ? findTourFile(root, value) : undefined
+  if (!path) {
+    sendJson(res, 404, { error: 'not found' })
+    return
+  }
+  sendJson(res, 200, { path })
+}
+
 /** DELETE /stop { route, target }: removes one stop, leaving the rest of the file as it was. */
 async function handleDeleteStop(req: IncomingMessage, res: ServerResponse, root: string): Promise<void> {
   let body: { route?: string; target?: string }
@@ -334,6 +377,8 @@ export function startTourServer(root: string, port: number): Promise<TourServer>
         handleDeleteStop(req, res, root).catch((err: Error) => {
           sendJson(res, 500, { error: err.message })
         })
+      } else if (req.method === 'GET' && path === '/find') {
+        handleFind(req, res, root)
       } else if (req.method === 'POST' && path === '/open') {
         handleOpen(req, res, root).catch((err: Error) => {
           sendJson(res, 500, { error: err.message })
