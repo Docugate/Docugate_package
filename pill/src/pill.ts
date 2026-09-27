@@ -607,7 +607,6 @@ function renderProse(el: HTMLElement, prose: string): void {
 export type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
 const CORNERS: Corner[] = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 const CORNER_KEY = 'docugate-pill-corner'
-const HIDDEN_KEY = 'docugate-pill-hidden'
 const EDGE = 16
 
 /** The corner nearest to a point, for snapping the badge where it is dropped. */
@@ -661,6 +660,8 @@ class DocugatePill {
   private inspEl: HTMLElement | null = null
   private inspectedPath = location.pathname
   private listCollapsed = false
+  /** Hidden for this page view only: a reload, or Alt+Shift+D, brings it back. */
+  private hidden = false
   private retarget: TourStop | null = null
   /** When a re-attached step is saved, the target it had before. */
   private editingFrom: string | null = null
@@ -692,6 +693,12 @@ class DocugatePill {
 
     this.init()
     this.patchHistory()
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.shiftKey && e.code === 'KeyD') {
+        e.preventDefault()
+        this.setHidden(!this.hidden)
+      }
+    })
 
     if (!this.isStaticMode) {
       this.listenEvents()
@@ -714,12 +721,7 @@ class DocugatePill {
   private render(): void {
     this.removePill()
 
-    if (!this.alive) return
-    try {
-      if (sessionStorage.getItem(HIDDEN_KEY)) return
-    } catch {
-      // storage blocked: show the pill
-    }
+    if (!this.alive || this.hidden) return
 
     const stops = this.tour?.stops.length ?? 0
     const btn = document.createElement('button')
@@ -785,6 +787,18 @@ class DocugatePill {
       }
       this.toggleMenu()
     })
+  }
+
+  private setHidden(hidden: boolean): void {
+    this.hidden = hidden
+    if (hidden) {
+      if (this.inspectorActive) this.stopInspector()
+      if (this.walkthroughActive) this.stopWalkthrough()
+      this.removePill()
+      this.toast('Pill hidden. Reload the page, or press Alt+Shift+D, to bring it back.')
+    } else {
+      this.render()
+    }
   }
 
   private removePill(): void {
@@ -986,16 +1000,8 @@ class DocugatePill {
     const hide = document.createElement('button')
     hide.className = 'link-btn'
     hide.textContent = 'Hide'
-    hide.title = 'Hide until this tab is reloaded'
-    hide.addEventListener('click', () => {
-      try {
-        sessionStorage.setItem(HIDDEN_KEY, '1')
-      } catch {
-        // hidden for now only
-      }
-      if (this.inspectorActive) this.stopInspector()
-      this.removePill()
-    })
+    hide.title = 'Hide the pill. Reload the page or press Alt+Shift+D to bring it back.'
+    hide.addEventListener('click', () => this.setHidden(true))
     foot.append(status, hide)
     return foot
   }

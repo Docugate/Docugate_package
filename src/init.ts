@@ -98,6 +98,8 @@ export interface InitFlowOptions {
   /** Base URL for DocuGate (overrides DOCUGATE_URL env var). */
   baseUrl?: string
   createSpaceFn?: (repo: string, name: string, docsDir: string) => Promise<{ name: string; owner: string; slug: string }>
+  /** Puts the project on GitHub when it has no remote; injectable for tests. */
+  createRepoFn?: (root: string, io: IO) => Promise<string | null>
   /** Opens a URL in the browser; injectable for tests. */
   openUrl?: (url: string) => void
 }
@@ -260,6 +262,53 @@ export async function choose(io: IO, question: string, options: string[], fallba
   }
 }
 
+function run(cmd: string, args: string[], cwd: string): { ok: boolean; out: string } {
+  try {
+    const out = execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' })
+    return { ok: true, out: out.trim() }
+  } catch (err) {
+    const e = err as { stderr?: string; message: string }
+    return { ok: false, out: (e.stderr ?? e.message).trim() }
+  }
+}
+
+/**
+ * A space reads from a GitHub repository. When the project has none yet, offer
+ * to create one with the GitHub CLI, which is already signed in as the person,
+ * and push the code to it. Returns owner/name, or null when skipped or failed.
+ * DocuGate's own GitHub sign-in is not given the right to create repositories.
+ */
+async function createGitHubRepo(root: string, io: IO): Promise<string | null> {
+  const pick = await choose(io, 'This project is not on GitHub yet, and a space reads from a GitHub repository.', [
+    'Create a GitHub repository for it now (uses the GitHub CLI)',
+    'Skip for now',
+  ])
+  if (pick !== 1) return null
+
+  if (!run('gh', ['auth', 'status'], root).ok) {
+    io.print('  The GitHub CLI is not installed or not signed in.')
+    io.print('  Install it from https://cli.github.com, run gh auth login, then docugate init again.')
+    return null
+  }
+  if (!run('git', ['rev-parse', 'HEAD'], root).ok) {
+    io.print('  Commit your code first (git add -A, then git commit), then run docugate init again.')
+    return null
+  }
+  const visibility = await choose(io, 'Who can see the repository?', [
+    'Public',
+    'Private (a space from a private repository needs DocuGate Pro)',
+  ])
+  const name = basename(root).replace(/[^A-Za-z0-9._-]+/g, '-')
+  const made = run('gh', ['repo', 'create', name, visibility === 1 ? '--public' : '--private', '--source', '.', '--remote', 'origin', '--push'], root)
+  if (!made.ok) {
+    io.print(`  Could not create the repository: ${made.out.split(/\r?\n/).pop()}`)
+    return null
+  }
+  const slug = defaultGetRemote(root)
+  if (slug) io.print(`  Created https://github.com/${slug} and pushed your code.`)
+  return slug
+}
+
 function defaultGetRemote(root: string): string | null {
   try {
     const remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
@@ -411,11 +460,14 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
 
     // ── 3b: connect this repository to a space ────────────────────────────────
     if (signedIn) {
-      // Read git remote.
-      const repoSlug = getRemoteFn(root)
+      // Read git remote; a project not on GitHub yet can be put there first.
+      let repoSlug = getRemoteFn(root)
+      if (!repoSlug && !yes) {
+        repoSlug = await (options.createRepoFn ?? createGitHubRepo)(root, io)
+      }
 
       if (!repoSlug) {
-        io.print(`  This repository has no GitHub remote yet, so it can't be connected to a space.`)
+        io.print(`  A space reads from a GitHub repository, so this one can't be connected yet.`)
       } else {
         // List spaces.
         let spaces: Space[] = []
