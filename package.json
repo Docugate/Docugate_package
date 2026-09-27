@@ -1,6 +1,6 @@
 {
   "name": "docugate",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Command-line tools for DocuGate: set up, check and prepare the documentation DocuGate reads straight from your repository.",
   "type": "module",
   "bin": {

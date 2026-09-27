@@ -115,7 +115,7 @@ export interface InitFlowResult {
   alreadySetUp?: string
 }
 
-function makeDefaultIO(): IO {
+export function makeDefaultIO(): IO {
   const isTTY = Boolean(process.stdin.isTTY)
   return {
     isTTY,

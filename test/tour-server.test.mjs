@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -353,16 +353,21 @@ test('request with a non-localhost Host is rejected with 403 (DNS rebinding)', a
 // CLI integration: tour serve
 // ---------------------------------------------------------------------------
 
-test('docugate tour serve exits with code 2 when .docugate/tour/ is absent', () => {
+test('docugate tour serve starts with no tour yet, so the pill can add the first step', async () => {
   const dir = repo({})
-  const result = spawnSync(process.execPath, [CLI, 'tour', 'serve'], {
-    cwd: dir,
-    encoding: 'utf8',
-    // Give it a short timeout; it should exit immediately when the dir is absent.
-    timeout: 5000,
+  const { spawn } = await import('node:child_process')
+  const child = spawn(process.execPath, [CLI, 'tour', 'serve', '--port', '0'], { cwd: dir })
+  const out = await new Promise((resolve, reject) => {
+    let text = ''
+    const timer = setTimeout(() => reject(new Error(`no output: ${text}`)), 8000)
+    child.stdout.on('data', (d) => {
+      text += d
+      if (text.includes('No tour yet')) { clearTimeout(timer); resolve(text) }
+    })
   })
-  assert.equal(result.status, 2)
-  assert.match(result.stderr, /docugate tour init/)
+  child.kill()
+  assert.match(out, /Tour server/)
+  assert.ok(existsSync(join(dir, '.docugate', 'tour')), 'the tour folder is created')
 })
 
 // ---------------------------------------------------------------------------

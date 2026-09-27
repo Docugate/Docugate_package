@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { check } from './check.js'
 import { loadConfig } from './config.js'
 import type { Issue } from './config.js'
-import { initFlow } from './init.js'
+import { choose, initFlow, makeDefaultIO } from './init.js'
 import type { Role } from './init.js'
 import { buildOpenApi, isCurrent, writeOpenApi } from './openapi.js'
 import { BobKeyMissingError, BobMissingError, tourInit } from './tour-init.js'
@@ -200,13 +201,26 @@ async function main() {
       if (roleFlag && !['frontend', 'backend', 'both'].includes(roleFlag)) {
         fail(`--role must be frontend, backend, or both.`)
       }
-      await initFlow(root, {
+      const port = one('port') !== undefined ? parseInt(one('port')!, 10) : DEFAULT_PORT
+      const result = await initFlow(root, {
         dir: one('dir'),
         title: one('title'),
         role: roleFlag,
         yes: args.bools.has('yes'),
-        port: one('port') !== undefined ? parseInt(one('port')!, 10) : undefined,
+        port,
       })
+      // The pill only shows while the tour server runs, so setup ends by
+      // offering to start it rather than leaving one more command to remember.
+      const where = result.alreadySetUp ?? root
+      const hasTour = result.role === 'frontend' || result.role === 'both'
+      if (hasTour && process.stdin.isTTY && !args.bools.has('yes')) {
+        const io = makeDefaultIO()
+        const pick = await choose(io, 'Start the tour server now, so the pill shows in your app?', [
+          'Yes, start it (leave this terminal open, then run your app as usual)',
+          'Later: docugate tour serve',
+        ])
+        if (pick === 1) await serveTour(where, port)
+      }
       return
     }
 
@@ -333,24 +347,7 @@ ${dim(`Bob: ${parts.join(', ')}`)}`)
         }
 
         case 'serve': {
-          const tourDir = `${root}/.docugate/tour`
-          if (!existsSync(tourDir)) {
-            console.error(`${red('error')} .docugate/tour/ not found. Run ${green('docugate tour init')} first.`)
-            process.exit(2)
-          }
-          const port = parseInt(one('port') ?? '4178', 10)
-          const server = await startTourServer(root, port)
-          const url = `http://localhost:${server.port}`
-          const screens = loadTours(root)
-          console.log(`${green('Tour server')}  ${url}`)
-          console.log(`${plural(screens.length, 'screen')} loaded from .docugate/tour/`)
-          if (!hasPillSnippet(root)) {
-            console.log(`${dim('Hint: run')} ${green('docugate tour install')} ${dim('to add the pill to your app automatically.')}`)
-          }
-          // Keep the process alive; Ctrl-C will stop it.
-          process.on('SIGINT', () => { server.close(); process.exit(0) })
-          process.on('SIGTERM', () => { server.close(); process.exit(0) })
-          await new Promise(() => { /* run until signal */ })
+          await serveTour(root, parseInt(one('port') ?? '4178', 10))
           return
         }
 
@@ -378,3 +375,28 @@ main().catch((error: Error) => {
   console.error(`${red('error')} ${error.message}`)
   process.exit(1)
 })
+
+/**
+ * Serves the tour to the pill until Ctrl-C. Starts even when there is no tour
+ * yet: the pill then shows on every page, and its inspector writes the first
+ * step, so a failed or skipped AI step never leaves the app without it.
+ */
+async function serveTour(root: string, port: number): Promise<void> {
+  mkdirSync(join(root, '.docugate', 'tour'), { recursive: true })
+  const server = await startTourServer(root, port)
+  const url = `http://localhost:${server.port}`
+  const screens = loadTours(root)
+  console.log(`${green('Tour server')}  ${url}`)
+  if (screens.length) {
+    console.log(`${plural(screens.length, 'screen')} loaded from .docugate/tour/`)
+  } else {
+    console.log(`No tour yet. Open your app: the pill shows on every page, and its Inspector adds the first step.`)
+  }
+  if (!hasPillSnippet(root)) {
+    console.log(`${dim('Hint: run')} ${green('docugate tour install')} ${dim('to add the pill to your app automatically.')}`)
+  }
+  console.log(dim('Leave this running while you work. Ctrl-C stops it.'))
+  process.on('SIGINT', () => { server.close(); process.exit(0) })
+  process.on('SIGTERM', () => { server.close(); process.exit(0) })
+  await new Promise(() => { /* run until signal */ })
+}
