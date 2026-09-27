@@ -20,6 +20,8 @@ interface Tour {
   title: string
   /** The tour file this screen lives in, as the server reports it. */
   file?: string
+  /** The project's published docs on DocuGate, when init linked a space. */
+  docsUrl?: string
   stops: TourStop[]
 }
 
@@ -129,7 +131,7 @@ function getServerBase(): string | null {
  * two are different: a page with no tour yet still gets the pill, so its first
  * stop can be added from the inspector. Only a silent server hides it.
  */
-async function fetchTour(base: string): Promise<{ alive: boolean; tour: Tour | null }> {
+async function fetchTour(base: string): Promise<{ alive: boolean; tour: Tour | null; docsUrl?: string }> {
   const pathname = location.pathname
   if (window.DOCUGATE_TOUR) {
     const match = window.DOCUGATE_TOUR.find((t) => matchRoute(t.route, pathname))
@@ -137,9 +139,13 @@ async function fetchTour(base: string): Promise<{ alive: boolean; tour: Tour | n
   }
   try {
     const res = await fetch(`${base}/tour?path=${encodeURIComponent(pathname)}`, { signal: AbortSignal.timeout(3000) })
-    if (res.status === 404) return { alive: true, tour: null }
+    if (res.status === 404) {
+      const body = (await res.json().catch(() => ({}))) as { docsUrl?: string }
+      return { alive: true, tour: null, docsUrl: body.docsUrl }
+    }
     if (!res.ok) return { alive: false, tour: null }
-    return { alive: true, tour: (await res.json()) as Tour }
+    const tour = (await res.json()) as Tour
+    return { alive: true, tour, docsUrl: tour.docsUrl }
   } catch {
     return { alive: false, tour: null }
   }
@@ -279,6 +285,8 @@ kbd {
   font-size: 12px;
   color: #8f8f8f;
 }
+.docs-link { margin-left: auto; color: #F4C43F; text-decoration: none; }
+.docs-link:hover { color: #ffd35c; background: rgba(244, 196, 63, 0.1); }
 .menu-foot .live { display: inline-flex; align-items: center; gap: 6px; }
 .menu-foot .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #45d483; box-shadow: 0 0 0 3px rgba(69, 212, 131, 0.15); }
 .link-btn { border: 0; background: none; color: #a1a1a1; font: inherit; cursor: pointer; padding: 2px 4px; border-radius: 5px; }
@@ -662,6 +670,8 @@ class DocugatePill {
   private listCollapsed = false
   /** Hidden for this page view only: a reload, or Alt+Shift+D, brings it back. */
   private hidden = false
+  /** The project's published docs on DocuGate, when init linked a space. */
+  private docsUrl: string | null = null
   private retarget: TourStop | null = null
   /** When a re-attached step is saved, the target it had before. */
   private editingFrom: string | null = null
@@ -713,9 +723,10 @@ class DocugatePill {
   }
 
   private async load(): Promise<void> {
-    const { alive, tour } = await fetchTour(this.base)
+    const { alive, tour, docsUrl } = await fetchTour(this.base)
     this.alive = alive
     this.tour = tour
+    this.docsUrl = docsUrl ?? null
   }
 
   private render(): void {
@@ -1002,7 +1013,17 @@ class DocugatePill {
     hide.textContent = 'Hide'
     hide.title = 'Hide the pill. Reload the page or press Alt+Shift+D to bring it back.'
     hide.addEventListener('click', () => this.setHidden(true))
-    foot.append(status, hide)
+    foot.append(status)
+    if (this.docsUrl && /^https:\/\//.test(this.docsUrl)) {
+      const docs = document.createElement('a')
+      docs.className = 'link-btn docs-link'
+      docs.href = this.docsUrl
+      docs.target = '_blank'
+      docs.rel = 'noopener noreferrer'
+      docs.textContent = 'Open the docs ↗'
+      foot.append(docs)
+    }
+    foot.append(hide)
     return foot
   }
 

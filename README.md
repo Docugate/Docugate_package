@@ -44,14 +44,15 @@ It asks, one at a time:
 | --- | --- |
 | What is in this repository? | **1** Frontend, **2** Backend, or **3** Both (a `frontend/` and a `backend/` folder in one repository). It suggests one from your folders. |
 | Sign in to DocuGate? | **1** opens your browser to sign in with GitHub. You come back to your editor when it is done. **2** skips it; `docugate login` does it later. |
-| Which DocuGate space should document this repository? | **1** creates a new space for it, or pick one of yours. A space already reading this repository is marked. |
+| Where should the documentation live? | **1** creates a new space, with a new GitHub repository on your account to hold its markdown (`<project>-docs`, with a first page). Or pick one of your spaces. The pill then links to the published docs. |
 | How often should DocuGate check your docs still match the code? | On every push, daily (suggested, fewer AI runs), weekly, or never. |
 | Set up the tour: which AI should write it? | **1** IBM Bob reads your code and writes the tour. **2** IBM watsonx is coming soon. **3** skips it; you can write the tour in the browser. Frontend and both only. |
 | Add the DocuGate pill to your app? | **1** adds a few lines to your `index.html` or Next.js layout that load the pill in development only. |
 | Start the tour server now? | **1** starts it, so the pill shows right away. |
 
-IBM Bob reads its API key from the `BOB_API_KEY` environment variable. If it is
-not set, setup opens the page where you create a key and lets you paste it for
+IBM Bob reads its API key from the `BOB_API_KEY` environment variable. If you
+saved it under another name (say `IBM_BOB_KEY`), setup finds it and asks before
+using it. If there is none, setup opens the page where you create a key and lets you paste it for
 that one run; DocuGate never saves it. To set it for good (then open a new terminal):
 
 ```powershell

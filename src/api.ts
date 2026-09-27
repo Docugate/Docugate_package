@@ -10,7 +10,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   no_repo_access: "DocuGate can't see this repository. Install the DocuGate GitHub App on it first",
   slug_taken: 'You already have a space with this name',
   repo_exists: 'You already have a repository with this name on GitHub',
-  app_permission: "DocuGate's GitHub App has not been allowed to create repositories yet",
+  app_permission: "DocuGate isn't allowed to create repositories on your account yet. Accept the DocuGate app's updated permissions at https://github.com/settings/installations, then try again",
   github_required: 'Sign in with GitHub to create a space',
 }
 
@@ -105,12 +105,24 @@ export async function createSpace(repo: string, name: string, docsDir: string): 
 }
 
 /** Creates an empty repository on the person's GitHub account, as them. */
-export async function createRepo(name: string, isPrivate: boolean): Promise<{ repo: string; url: string; cloneUrl: string }> {
+export interface CreatedRepo {
+  repo: string
+  url: string
+  cloneUrl: string
+  /** For a docs repository: whether docs/index.md was written into it. */
+  seeded?: boolean
+}
+
+/**
+ * Creates a repository on the person's GitHub account, as them. With `docs`,
+ * it is a documentation repository that starts with docs/index.md.
+ */
+export async function createRepo(name: string, isPrivate: boolean, docs?: { title: string }): Promise<CreatedRepo> {
   const res = await apiFetch('/api/repos', {
     method: 'POST',
-    body: JSON.stringify({ name, private: isPrivate }),
+    body: JSON.stringify({ name, private: isPrivate, docs: Boolean(docs), title: docs?.title }),
   })
-  return (await res.json()) as { repo: string; url: string; cloneUrl: string }
+  return (await res.json()) as CreatedRepo
 }
 
 export async function connectRepo(spaceId: string, repo: string, docsDir: string): Promise<void> {

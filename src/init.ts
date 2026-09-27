@@ -5,6 +5,8 @@ import { basename, dirname, join } from 'node:path'
 import { CONFIG_FILE, loadConfig } from './config.js'
 import type { RunBob } from './tour-init.js'
 import { tourInit, BobMissingError, BobKeyMissingError, readBobKey, useBobKeyForThisRun } from './tour-init.js'
+import type { CreatedRepo } from './api.js'
+import { bobKeyCandidates, startSpinner } from './spinner.js'
 import { tourInstall, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import type { TourInitResult } from './tour-init.js'
 import type { TourInstallResult } from './tour-install.js'
@@ -98,10 +100,8 @@ export interface InitFlowOptions {
   /** Base URL for DocuGate (overrides DOCUGATE_URL env var). */
   baseUrl?: string
   createSpaceFn?: (repo: string, name: string, docsDir: string) => Promise<{ name: string; owner: string; slug: string }>
-  /** Puts the project on GitHub when it has no remote; injectable for tests. */
-  createRepoFn?: (root: string, io: IO) => Promise<string | null>
-  /** The DocuGate call that creates the empty repository; injectable for tests. */
-  createGitHubRepoFn?: CreateRepoFn
+  /** Creates the documentation repository for a new space; injectable for tests. */
+  createDocsRepoFn?: (name: string, isPrivate: boolean, title: string) => Promise<CreatedRepo>
   /** Opens a URL in the browser; injectable for tests. */
   openUrl?: (url: string) => void
 }
@@ -136,6 +136,70 @@ export function makeDefaultIO(): IO {
       console.log(line)
     },
   }
+}
+
+/**
+ * A new space and the repository that holds its docs: the repository is
+ * created on the person's account with docs/index.md in it, then the space is
+ * made from it. Returns the space, or undefined when something stopped it
+ * (every reason is printed).
+ */
+async function createDocsSpace(
+  io: IO,
+  projectName: string,
+  baseUrl: string,
+  options: InitFlowOptions,
+): Promise<{ owner: string; slug: string; name: string } | undefined> {
+  const visibility = await choose(io, 'Who can read the docs repository on GitHub?', [
+    'Public',
+    'Private (a space from a private repository needs DocuGate Pro)',
+  ])
+  const repoName = `${projectName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '')}-docs`
+
+  const stop = startSpinner(['Creating the docs repository on GitHub', 'Writing its first page', 'Almost there'])
+  let repo: CreatedRepo
+  try {
+    repo = await (options.createDocsRepoFn ?? (async (name: string, priv: boolean, title: string) => {
+      const { createRepo } = await import('./api.js')
+      return createRepo(name, priv, { title })
+    }))(repoName, visibility === 2, projectName)
+    stop()
+    io.print(`  Created ${repo.url}`)
+  } catch (err) {
+    stop()
+    io.print(`  warning  ${(err as Error).message}`)
+    return undefined
+  }
+
+  const createFn = options.createSpaceFn ?? (async (r: string, name: string, dir: string) => {
+    const { createSpace } = await import('./api.js')
+    return createSpace(r, name, dir)
+  })
+  // A space only ever reads a repository DocuGate can see. One installed on
+  // selected repositories may not include the new one yet: offer the install
+  // and try again once.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const stopSpace = startSpinner(['Setting up your space', 'Reading the docs repository'])
+    try {
+      const space = await createFn(repo.repo, projectName, 'docs')
+      stopSpace()
+      io.print(`  Created space "${space.name}"`)
+      if (repo.seeded === false) io.print(`  Add markdown files to docs/ in ${repo.repo} and they become pages.`)
+      return space
+    } catch (err) {
+      stopSpace()
+      io.print(`  warning  ${(err as Error).message}`)
+      if ((err as { code?: string }).code !== 'no_repo_access' || attempt > 0) return undefined
+      const fix = await choose(io, `The DocuGate GitHub App can't see ${repo.repo} yet.`, [
+        'Add it to the app (opens GitHub), then try again',
+        'Skip for now',
+      ])
+      if (fix !== 1) return undefined
+      ;(options.openUrl ?? openInBrowser)(`${baseUrl}/api/auth/github?install=1`)
+      await io.ask(`  On GitHub, add ${repo.repo} (or choose All repositories) and save. Then press Enter here`, '')
+    }
+  }
+  return undefined
 }
 
 /**
@@ -265,82 +329,6 @@ export async function choose(io: IO, question: string, options: string[], fallba
     if (Number.isInteger(n) && n >= 1 && n <= options.length) return n
     io.print(`  Type a number from 1 to ${options.length}.`)
   }
-}
-
-type CreateRepoFn = (name: string, isPrivate: boolean) => Promise<{ repo: string; url: string; cloneUrl: string }>
-
-function run(cmd: string, args: string[], cwd: string): { ok: boolean; out: string } {
-  try {
-    const out = execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' })
-    return { ok: true, out: out.trim() }
-  } catch (err) {
-    const e = err as { stderr?: string; message: string }
-    return { ok: false, out: (e.stderr ?? e.message).trim() }
-  }
-}
-
-/**
- * A space reads from a GitHub repository. When the project has none yet, offer
- * to create one with the GitHub CLI, which is already signed in as the person,
- * and push the code to it. Returns owner/name, or null when skipped or failed.
- * DocuGate's own GitHub sign-in is not given the right to create repositories.
- */
-async function createGitHubRepo(root: string, io: IO, create?: CreateRepoFn): Promise<string | null> {
-  const pick = await choose(io, 'This project is not on GitHub yet, and a space reads from a GitHub repository.', [
-    'Create a GitHub repository for it now, and push this code to it',
-    'Skip for now',
-  ])
-  if (pick !== 1) return null
-
-  if (!run('git', ['rev-parse', 'HEAD'], root).ok) {
-    io.print('  Commit your code first (git add -A, then git commit), then run docugate init again.')
-    return null
-  }
-  const visibility = await choose(io, 'Who can see the repository?', [
-    'Public',
-    'Private (a space from a private repository needs DocuGate Pro)',
-  ])
-  const name = basename(root).replace(/[^A-Za-z0-9._-]+/g, '-')
-  const isPrivate = visibility === 2
-
-  // DocuGate creates it as the person, through its GitHub App. An App that has
-  // not been given the permission yet falls through to the GitHub CLI.
-  try {
-    const made = await (create ?? (async (n: string, priv: boolean) => {
-      const { createRepo } = await import('./api.js')
-      return createRepo(n, priv)
-    }))(name, isPrivate)
-    if (!run('git', ['remote', 'add', 'origin', made.cloneUrl], root).ok) {
-      run('git', ['remote', 'set-url', 'origin', made.cloneUrl], root)
-    }
-    const pushed = run('git', ['push', '-u', 'origin', 'HEAD'], root)
-    if (!pushed.ok) {
-      io.print(`  Created ${made.url}, but the push failed: ${pushed.out.split(/\r?\n/).pop()}`)
-      io.print('  Push it yourself with git push -u origin HEAD, then run docugate init again.')
-      return null
-    }
-    io.print(`  Created ${made.url} and pushed your code.`)
-    return made.repo
-  } catch (err) {
-    if ((err as { code?: string }).code !== 'app_permission') {
-      io.print(`  Could not create the repository: ${(err as Error).message}`)
-      return null
-    }
-  }
-
-  if (!run('gh', ['auth', 'status'], root).ok) {
-    io.print("  DocuGate can't create repositories on your account yet, and the GitHub CLI is not signed in.")
-    io.print('  Create the repository on github.com, push this code to it, then run docugate init again.')
-    return null
-  }
-  const made = run('gh', ['repo', 'create', name, isPrivate ? '--private' : '--public', '--source', '.', '--remote', 'origin', '--push'], root)
-  if (!made.ok) {
-    io.print(`  Could not create the repository: ${made.out.split(/\r?\n/).pop()}`)
-    return null
-  }
-  const slug = defaultGetRemote(root)
-  if (slug) io.print(`  Created https://github.com/${slug} with the GitHub CLI and pushed your code.`)
-  return slug
 }
 
 function defaultGetRemote(root: string): string | null {
@@ -492,106 +480,69 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
       }
     }
 
-    // ── 3b: connect this repository to a space ────────────────────────────────
+    // ── 3b: the space that holds this project's documentation ─────────────────
+    // A space reads markdown from a GitHub repository. A new space gets its own
+    // documentation repository, created on the person's account; an existing
+    // space can be picked instead. Either way docugate.json remembers it, so the
+    // pill can link to the published docs.
     if (signedIn) {
-      // Read git remote; a project not on GitHub yet can be put there first.
-      let repoSlug = getRemoteFn(root)
-      if (!repoSlug && !yes) {
-        repoSlug = options.createRepoFn
-          ? await options.createRepoFn(root, io)
-          : await createGitHubRepo(root, io, options.createGitHubRepoFn)
+      const repoSlug = getRemoteFn(root)
+      let spaces: Space[] = []
+      try {
+        spaces = (await getSpacesFn()).spaces
+      } catch (err) {
+        connectError = `Couldn't load spaces: ${(err as Error).message}`
+        io.print(`  warning  ${connectError}`)
       }
 
-      if (!repoSlug) {
-        io.print(`  A space reads from a GitHub repository, so this one can't be connected yet.`)
-      } else {
-        // List spaces.
-        let spaces: Space[] = []
+      const { docsDir: repoDocsDir, config } = loadConfig(root)
+      const projectName = config.title ?? repoSlug?.split('/')[1] ?? basename(root)
+      const hasRepo = (sp: Space) =>
+        Boolean(repoSlug) && (sp.sources ?? []).some((src) => src.repo.toLowerCase() === repoSlug!.toLowerCase())
+      const already = spaces.find(hasRepo)
+      const linkSpace = (sp: { owner: string; slug: string; name: string }) => {
+        saveSetting(root, 'space', `${sp.owner}/${sp.slug}`)
+        io.print(`  Docs will be published at ${BASE_URL}/${sp.owner}/${sp.slug}`)
+      }
+      const connectProject = async (sp: Space) => {
+        if (!repoSlug || hasRepo(sp)) return
         try {
-          const res = await getSpacesFn()
-          spaces = res.spaces
+          await connectFn(sp.id, repoSlug, repoDocsDir)
+          io.print(`  Connected ${repoSlug} to space "${sp.name}".`)
         } catch (err) {
-          connectError = `Couldn't load spaces: ${(err as Error).message}`
+          connectError = (err as Error).message
           io.print(`  warning  ${connectError}`)
         }
+      }
 
-        const { docsDir: repoDocsDir } = loadConfig(root)
-        const hasRepo = (sp: Space) => (sp.sources ?? []).some((src) => src.repo.toLowerCase() === repoSlug.toLowerCase())
-        const already = spaces.find(hasRepo)
-
-        if (connectError) {
-          // the warning is printed already; carry on with the rest of setup
-        } else if (yes) {
-          // --yes: connect only when there is no doubt which space is meant.
-          if (already) {
-            io.print(`  ${repoSlug} is already in space "${already.name}".`)
-          } else if (spaces.length === 1) {
-            try {
-              await connectFn(spaces[0].id, repoSlug, repoDocsDir)
-              io.print(`  Connected ${repoSlug} to space "${spaces[0].name}".`)
-            } catch (err) {
-              connectError = (err as Error).message
-              io.print(`  warning  ${connectError}`)
-            }
-          } else if (spaces.length > 1) {
-            io.print(`  Several spaces found: run docugate init again without --yes to choose.`)
-          }
+      if (connectError) {
+        // the warning is printed already; carry on with the rest of setup
+      } else if (yes) {
+        // --yes: use the space only when there is no doubt which one is meant.
+        const only = already ?? (spaces.length === 1 ? spaces[0] : undefined)
+        if (only) {
+          await connectProject(only)
+          linkSpace(only)
+        } else if (spaces.length > 1) {
+          io.print(`  Several spaces found: run docugate init again without --yes to choose.`)
+        }
+      } else {
+        const choices = [
+          'Create a new space, with a new repository for its docs',
+          ...spaces.map((sp) => `${sp.name}  (${sp.owner}/${sp.slug})${hasRepo(sp) ? '  already has this project' : ''}`),
+          'Skip for now',
+        ]
+        const pick = await choose(io, `Where should the documentation for ${projectName} live?`, choices, already ? spaces.indexOf(already) + 2 : 1)
+        if (pick === 1) {
+          const created = await createDocsSpace(io, projectName, BASE_URL, options)
+          if (created) linkSpace(created)
+          else connectError = 'The space was not created.'
+        } else if (pick <= spaces.length + 1) {
+          const sp = spaces[pick - 2]
+          await connectProject(sp)
+          linkSpace(sp)
         } else {
-          // Interactive: create a space, or pick one, or skip. Numbers only.
-          const choices = [
-            `Create a new space for ${repoSlug}`,
-            ...spaces.map((sp) => `${sp.name}  (${sp.owner}/${sp.slug})${hasRepo(sp) ? '  already reads this repository' : ''}`),
-            'Skip for now',
-          ]
-          const pick = await choose(
-            io,
-            `Which DocuGate space should document ${repoSlug}?`,
-            choices,
-            already ? spaces.indexOf(already) + 2 : 1,
-          )
-          if (pick === 1) {
-            const createFn = options.createSpaceFn ?? (async (repo: string, name: string, dir: string) => {
-              const { createSpace } = await import('./api.js')
-              return createSpace(repo, name, dir)
-            })
-            // A space only ever points at a repository DocuGate can read. A
-            // new one usually is not visible to the GitHub App yet, so offer
-            // the install and try again once, instead of stopping at an error.
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                const created = await createFn(repoSlug, loadConfig(root).config.title ?? repoSlug.split('/')[1], repoDocsDir)
-                io.print(`  Created space "${created.name}": ${BASE_URL}/${created.owner}/${created.slug}`)
-                connectError = undefined
-                break
-              } catch (err) {
-                connectError = (err as Error).message
-                io.print(`  warning  ${connectError}`)
-                if ((err as { code?: string }).code !== 'no_repo_access' || attempt > 0) break
-                const fix = await choose(io, `The DocuGate GitHub App can't see ${repoSlug} yet.`, [
-                  'Install it on this repository (opens GitHub), then try again',
-                  'Skip for now',
-                ])
-                if (fix !== 1) break
-                ;(options.openUrl ?? openInBrowser)(`${BASE_URL}/api/auth/github?install=1`)
-                await io.ask(`  On GitHub, choose ${repoSlug} (or All repositories) and save. Then press Enter here`, '')
-              }
-            }
-          } else if (pick <= spaces.length + 1) {
-            const sp = spaces[pick - 2]
-            if (hasRepo(sp)) {
-              io.print(`  ${repoSlug} is already in space "${sp.name}". Nothing to change.`)
-            } else {
-              try {
-                await connectFn(sp.id, repoSlug, repoDocsDir)
-                io.print(`  Connected ${repoSlug} to space "${sp.name}".`)
-              } catch (err) {
-                connectError = (err as Error).message
-                io.print(`  warning  ${connectError}`)
-              }
-            }
-          } else {
-            io.print(`  Skipped. docugate init connects it any time.`)
-          }
+          io.print(`  Skipped. docugate init sets it up any time.`)
         }
       }
     }
@@ -622,17 +573,45 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
       ], 3)
       if (pick === 2) io.print('  IBM watsonx is coming soon. Skipped for now: run docugate tour init when you are ready.')
       runTour = pick === 1
-      if (runTour && !readBobKey() && !options.runBob) runTour = await askForBobKey(io, options.openUrl)
+      if (runTour && !readBobKey() && !options.runBob) {
+        // The key may be in the environment under another name.
+        const [other] = bobKeyCandidates()
+        if (other) {
+          const use = await choose(io, `BOB_API_KEY is not set, but ${other} is. Is that your IBM Bob key?`, [
+            `Yes, use ${other} for this run`,
+            'No',
+          ])
+          if (use === 1) {
+            useBobKeyForThisRun(process.env[other]!)
+            io.print(`  Tip: rename it to BOB_API_KEY in your environment so Bob finds it next time.`)
+          }
+        }
+        if (!readBobKey()) runTour = await askForBobKey(io, options.openUrl)
+      }
     }
 
     if (runTour) {
+      // Bob takes a minute or two. Show it working, the way an assistant does.
+      const stop = options.runBob
+        ? () => undefined
+        : startSpinner([
+            'IBM Bob is reading your screens and routes',
+            'Following each value to the endpoint it comes from',
+            'Tracing it into the backend',
+            'Writing the tour, one step per element',
+            'Checking every file it names exists',
+            'Still working: bigger apps take a little longer',
+          ])
       try {
         tourResult = tourInit(root, { runBob: options.runBob })
+        stop()
+        io.print(`  IBM Bob wrote the tour.`)
       } catch (error) {
+        stop()
         // Bob missing or failed — describe what went wrong, then continue.
         if (error instanceof BobKeyMissingError) {
           tourError =
-            `Bob Shell needs an API key. Set BOB_API_KEY, then run docugate tour init.`
+            `IBM Bob did not accept the key. Check BOB_API_KEY holds an Inference key from bob.ibm.com, then run docugate tour init.`
         } else if (error instanceof BobMissingError) {
           tourError =
             `Bob Shell is not installed. Install it, sign in, then run docugate tour init.`

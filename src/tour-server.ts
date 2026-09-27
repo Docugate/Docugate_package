@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, watch, 
 import { join, relative, resolve, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadTours, matchRoute, parseTourFile, routeToFilename, serializeTourFile } from './tour.js'
+import { loadConfig } from './config.js'
 import type { Tour, TourStop } from './tour.js'
 
 // ---------------------------------------------------------------------------
@@ -103,11 +104,19 @@ function handleGetTour(req: IncomingMessage, res: ServerResponse, root: string):
   const pathname = url.searchParams.get('path') ?? '/'
   const tours = loadTours(root)
   const match = tours.find((t) => matchRoute(t.route, pathname))
+  const docsUrl = publishedDocsUrl(root)
   if (!match) {
-    sendJson(res, 404, { error: 'not found' })
+    sendJson(res, 404, { error: 'not found', docsUrl })
     return
   }
-  sendJson(res, 200, { route: match.route, title: match.title, file: match.file, stops: match.stops })
+  sendJson(res, 200, { route: match.route, title: match.title, file: match.file, docsUrl, stops: match.stops })
+}
+
+/** Where this project's docs are published, from the space docugate init saved. */
+export function publishedDocsUrl(root: string): string | undefined {
+  const space = loadConfig(root).config.space
+  if (!space || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(space)) return undefined
+  return `${process.env.DOCUGATE_URL ?? 'https://www.trydocugate.site'}/${space}`
 }
 
 function handleGetEvents(req: IncomingMessage, res: ServerResponse, root: string): void {

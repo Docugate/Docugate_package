@@ -67,6 +67,8 @@ export type DocugateConfig = {
   role?: 'frontend' | 'backend' | 'both'
   /** How often DocuGate checks the docs still match the code. */
   freshness?: 'push' | 'daily' | 'weekly' | 'off'
+  /** The DocuGate space the docs publish to, as owner/slug. */
+  space?: string
   sidebar?: string[]
   api?: {
     generate?: {
@@ -79,4 +81,4 @@ export type DocugateConfig = {
   }
 }
 
-export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'role', 'freshness', 'sidebar', 'api'])
+export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'role', 'freshness', 'space', 'sidebar', 'api'])

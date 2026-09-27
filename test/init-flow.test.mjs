@@ -28,12 +28,13 @@ function fakeIO(answers = [], { isTTY = true } = {}) {
   let question = ''
   let optionCount = 0
   const toNumber = (answer) => {
-    if (/^\d+$/.test(answer) && !question.startsWith('Which DocuGate space')) return answer
+    const spaceQ = question.startsWith('Where should the documentation')
+    if (/^\d+$/.test(answer) && !spaceQ) return answer
     if (question.startsWith('What is in this repository')) return String(['frontend', 'backend', 'both'].indexOf(answer) + 1)
     if (question.startsWith('Sign in')) return /^y/i.test(answer) ? '1' : '2'
     if (question.startsWith('Set up the tour')) return /^y/i.test(answer) ? '1' : '3'
     if (question.startsWith('Add the DocuGate pill')) return /^y/i.test(answer) ? '1' : '2'
-    if (question.startsWith('Which DocuGate space')) return answer === 'skip' ? String(optionCount) : answer === 'create' ? '1' : String(Number(answer) + 1)
+    if (spaceQ) return answer === 'skip' ? String(optionCount) : answer === 'create' ? '1' : String(Number(answer) + 1)
     return answer
   }
   return {
@@ -447,7 +448,7 @@ test('no spaces: offers to create one, and creates it', async () => {
   const dir = repo({})
   const bob = fakeBob(dir)
   // answers: role=backend, space=1 (create)  (already signed in — no sign-in question)
-  const { io, printed } = fakeIO(['backend', 'create'])
+  const { io, printed } = fakeIO(['backend', 'create', '1'])
   const connectCalls = []
   const created = []
 
@@ -459,13 +460,16 @@ test('no spaces: offers to create one, and creates it', async () => {
     getSpacesFn: async () => ({ spaces: [] }),
     connectFn: async () => { connectCalls.push(1) },
     createSpaceFn: async (repo, name) => { created.push(repo); return { name, owner: 'alice', slug: 'app' } },
+    createDocsRepoFn: async (name) => ({ repo: `alice/${name}`, url: `https://github.com/alice/${name}`, cloneUrl: '', seeded: true }),
     getRemoteFn: FAKE_REMOTE,
     baseUrl: 'https://example.com',
   })
 
   assert.equal(connectCalls.length, 0)
   assert.equal(created.length, 1)
-  assert.ok(printed.some((l) => l.includes('Create a new space')))
+  assert.ok(printed.some((l) => l.includes('Create a new space, with a new repository for its docs')))
+  assert.match(created[0], /-docs$/, 'the space reads the new docs repository')
+  assert.equal(JSON.parse(readFileSync(join(dir, 'docugate.json'), 'utf8')).space, 'alice/app')
   assert.ok(printed.some((l) => l.includes('example.com/alice/app')))
 })
 
@@ -579,7 +583,7 @@ test('a repository the GitHub App cannot see: offers the install, then creates t
   const dir = repo({})
   const opened = []
   let calls = 0
-  const { io, printed } = fakeIO(['backend', 'create', '1', ''])
+  const { io, printed } = fakeIO(['backend', 'create', '1', '1', ''])
   await initFlow(dir, {
     io,
     getSessionFn: async () => SESSION_ALICE,
@@ -590,6 +594,7 @@ test('a repository the GitHub App cannot see: offers the install, then creates t
       return { name, owner: 'alice', slug: 'app' }
     },
     openUrl: (u) => opened.push(u),
+    createDocsRepoFn: async (name) => ({ repo: `alice/${name}`, url: `https://github.com/alice/${name}`, cloneUrl: '', seeded: true }),
     getRemoteFn: FAKE_REMOTE,
     baseUrl: 'https://example.com',
   })
@@ -598,29 +603,29 @@ test('a repository the GitHub App cannot see: offers the install, then creates t
   assert.ok(printed.some((l) => l.includes('Created space')))
 })
 
-test('no GitHub repository yet: DocuGate creates one, the code is pushed, then the space is made', async () => {
-  const { execFileSync } = await import('node:child_process')
+test('a project with no GitHub repository can still get a space, from a new docs repository', async () => {
   const dir = repo({ 'index.html': '<html><body></body></html>' })
-  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
-  git('init', '-q'); git('add', '-A'); git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'first')
-  const bare = mkdtempSync(join(tmpdir(), 'docugate-remote-'))
-  execFileSync('git', ['init', '-q', '--bare', bare])
-  const createdSpaces = []
-  // answers: role=backend, create repo=1, public=1, space=create
-  const { io, printed } = fakeIO(['backend', '1', '1', 'create'])
+  const made = []
+  // answers: role=backend, space=create, public=1
+  const { io } = fakeIO(['backend', 'create', '1'])
   await initFlow(dir, {
     io,
     getSessionFn: async () => SESSION_ALICE,
     loginFn: async () => ({ token: 'tok' }),
     getSpacesFn: async () => ({ spaces: [] }),
     getRemoteFn: () => null,
-    createGitHubRepoFn: async (name) => ({ repo: `alice/${name}`, url: `https://github.com/alice/${name}`, cloneUrl: bare }),
-    createSpaceFn: async (repo, name) => { createdSpaces.push(repo); return { name, owner: 'alice', slug: 'app' } },
+    createDocsRepoFn: async (name, isPrivate) => { made.push({ name, isPrivate }); return { repo: `alice/${name}`, url: '', cloneUrl: '', seeded: true } },
+    createSpaceFn: async (r, name) => ({ name, owner: 'alice', slug: 'x' }),
     baseUrl: 'https://example.com',
   })
-  const pushed = execFileSync('git', ['--git-dir', bare, 'log', '--oneline'], { encoding: 'utf8' })
-  assert.match(pushed, /first/, 'the commit reached the new repository')
-  assert.equal(createdSpaces.length, 1)
-  assert.match(createdSpaces[0], /^alice\//)
-  assert.ok(printed.some((l) => l.includes('pushed your code')))
+  assert.equal(made.length, 1)
+  assert.match(made[0].name, /-docs$/)
+  assert.equal(made[0].isPrivate, false)
+})
+
+test('a Bob key saved under another name is found, and BOB_API_KEY itself is not listed', async () => {
+  const { bobKeyCandidates } = await import('../dist/spinner.js')
+  assert.deepEqual(bobKeyCandidates({ IBM_BOB_KEY: 'x', BOB_API_KEY: 'y', PATH: '/bin', GITHUB_TOKEN: 'z' }), ['IBM_BOB_KEY'])
+  assert.deepEqual(bobKeyCandidates({ WATSONX_API_KEY: 'k' }), ['WATSONX_API_KEY'])
+  assert.deepEqual(bobKeyCandidates({ IBM_BOB_KEY: '' }), [])
 })
