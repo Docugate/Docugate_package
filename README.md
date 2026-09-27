@@ -217,6 +217,7 @@ One per repository, at its root.
 | `docsDir` | The folder DocuGate reads. Defaults to `docs`. |
 | `title` | The space's title. |
 | `role` | Repository role: `frontend`, `backend`, or `both`. Set by `docugate init`. |
+| `freshness` | How often DocuGate checks that the docs still match the code: `push`, `daily`, `weekly` or `off`. Set by `docugate init`; the scheduled check itself is coming soon. |
 | `sidebar` | File and folder names in the order the sidebar should show them. Orders this repository's own pages, not the whole space. |
 | `api.generate` | Defaults for `docugate openapi`. |
 

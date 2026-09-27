@@ -14,20 +14,48 @@ function repo(files) {
   return dir
 }
 
-/** Fake IO that returns preset answers and records printed lines. */
+/**
+ * Fake IO that returns preset answers and records printed lines. Setup only
+ * takes numbers, so the readable answers the tests are written with (role
+ * names, y/n, a space's position in the list) are turned into the number of
+ * the matching option for whichever question was printed last. The freshness
+ * question is answered with its default, so older answer lists still line up.
+ */
 function fakeIO(answers = [], { isTTY = true } = {}) {
   const printed = []
+  const asked = []
   const remaining = [...answers]
+  let question = ''
+  let optionCount = 0
+  const toNumber = (answer) => {
+    if (/^\d+$/.test(answer) && !question.startsWith('Which DocuGate space')) return answer
+    if (question.startsWith('What is in this repository')) return String(['frontend', 'backend', 'both'].indexOf(answer) + 1)
+    if (question.startsWith('Sign in')) return /^y/i.test(answer) ? '1' : '2'
+    if (question.startsWith('Set up the tour')) return /^y/i.test(answer) ? '1' : '3'
+    if (question.startsWith('Add the DocuGate pill')) return /^y/i.test(answer) ? '1' : '2'
+    if (question.startsWith('Which DocuGate space')) return answer === 'skip' ? String(optionCount) : answer === 'create' ? '1' : String(Number(answer) + 1)
+    return answer
+  }
   return {
     io: {
       isTTY,
       ask(_q, defaultAnswer) {
+        asked.push(question)
+        if (question.startsWith('How often')) return Promise.resolve(defaultAnswer)
         const next = remaining.shift()
-        return Promise.resolve(next !== undefined ? next : defaultAnswer)
+        return Promise.resolve(next !== undefined ? toNumber(next) : defaultAnswer)
       },
-      print(line) { printed.push(line) },
+      print(line) {
+        printed.push(line)
+        if (/^ {4}\d+ {2}/.test(line)) optionCount++
+        else if (/^ {2}\S/.test(line)) {
+          question = line.trim()
+          optionCount = 0
+        }
+      },
     },
     printed,
+    asked,
   }
 }
 
@@ -415,12 +443,13 @@ test('getSpacesFn throws: prints error and continues to tour steps', async () =>
   assert.ok(printed.some((l) => l.includes('Next: docugate tour serve')))
 })
 
-test('no spaces: prints dashboard link and continues', async () => {
+test('no spaces: offers to create one, and creates it', async () => {
   const dir = repo({})
   const bob = fakeBob(dir)
-  // answers: role=backend  (already signed in — no sign-in question)
-  const { io, printed } = fakeIO(['backend'])
+  // answers: role=backend, space=1 (create)  (already signed in — no sign-in question)
+  const { io, printed } = fakeIO(['backend', 'create'])
   const connectCalls = []
+  const created = []
 
   await initFlow(dir, {
     io,
@@ -429,12 +458,35 @@ test('no spaces: prints dashboard link and continues', async () => {
     loginFn: async () => ({ token: 'tok' }),
     getSpacesFn: async () => ({ spaces: [] }),
     connectFn: async () => { connectCalls.push(1) },
+    createSpaceFn: async (repo, name) => { created.push(repo); return { name, owner: 'alice', slug: 'app' } },
     getRemoteFn: FAKE_REMOTE,
     baseUrl: 'https://example.com',
   })
 
   assert.equal(connectCalls.length, 0)
-  assert.ok(printed.some((l) => l.includes('example.com/dashboard/new')))
+  assert.equal(created.length, 1)
+  assert.ok(printed.some((l) => l.includes('Create a new space')))
+  assert.ok(printed.some((l) => l.includes('example.com/alice/app')))
+})
+
+test('setup never asks for a word: every question is a numbered choice', async () => {
+  const dir = repo({ 'index.html': '<html><body></body></html>' })
+  const bob = fakeBob(dir)
+  const { io, printed } = fakeIO(['frontend', 'n', 'n', 'n'])
+  await initFlow(dir, { io, runBob: bob.runBob, ...NO_AUTH })
+  const prompts = printed.filter((l) => /^ {4}\d+ {2}/.test(l))
+  assert.ok(prompts.length >= 9, 'role, sign-in, freshness, tour and pill each list numbered options')
+  assert.ok(printed.some((l) => l.includes('IBM watsonx (coming soon)')))
+  assert.equal(JSON.parse(readFileSync(join(dir, 'docugate.json'), 'utf8')).freshness, 'daily')
+})
+
+test('inside a project already set up above, init points there instead of a second tour', async () => {
+  const dir = repo({ '.git/HEAD': 'ref: refs/heads/main', 'docugate.json': '{"docsDir":"docs"}', 'docs/index.md': '# Hi', 'frontend/index.html': '<html></html>' })
+  const { io, printed } = fakeIO([])
+  const result = await initFlow(join(dir, 'frontend'), { io, ...NO_AUTH })
+  assert.equal(result.alreadySetUp, dir)
+  assert.ok(!existsSync(join(dir, 'frontend', 'docugate.json')), 'no second setup')
+  assert.ok(printed.some((l) => l.includes('already set up')))
 })
 
 test('connectFn throws pro_required_sources: prints human message and continues', async () => {

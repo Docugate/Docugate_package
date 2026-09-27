@@ -5,6 +5,11 @@ export const BASE_URL = process.env.DOCUGATE_URL ?? 'https://www.trydocugate.sit
 
 const ERROR_MESSAGES: Record<string, string> = {
   pro_required_sources: 'Connecting more than one repository to a space needs DocuGate Pro',
+  space_limit: 'The free plan has one space. Connect this repository to it, or upgrade to Pro',
+  pro_required: 'Private repositories need DocuGate Pro',
+  no_repo_access: "DocuGate can't see this repository. Install the DocuGate GitHub App on it first",
+  slug_taken: 'You already have a space with this name',
+  github_required: 'Sign in with GitHub to create a space',
 }
 
 function friendlyError(code: string): string {
@@ -71,6 +76,8 @@ export interface Space {
   owner: string
   slug: string
   name: string
+  /** The repositories the space reads from. */
+  sources?: Array<{ repo: string }>
 }
 
 export interface SpacesResponse {
@@ -85,6 +92,14 @@ export async function getSession(): Promise<SessionResponse> {
 export async function getSpaces(): Promise<SpacesResponse> {
   const res = await apiFetch('/api/spaces/mine')
   return res.json() as Promise<SpacesResponse>
+}
+
+export async function createSpace(repo: string, name: string, docsDir: string): Promise<Space> {
+  const res = await apiFetch('/api/spaces', {
+    method: 'POST',
+    body: JSON.stringify({ repo, name, docsDir }),
+  })
+  return ((await res.json()) as { space: Space }).space
 }
 
 export async function connectRepo(spaceId: string, repo: string, docsDir: string): Promise<void> {

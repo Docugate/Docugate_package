@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { isMap, isSeq, parseDocument } from 'yaml'
 
 // `docugate tour init` writes the first tour of an app by asking IBM Bob
@@ -104,9 +105,31 @@ export class BobMissingError extends Error {}
 /** Bob Shell's headless mode signs in with an API key, not the IDE's IBMid session. */
 export class BobKeyMissingError extends Error {}
 
+/** Where `docugate init` keeps the Bob API key: the home folder, never the repository. */
+export function bobKeyPath(): string {
+  return join(homedir(), '.docugate', 'bob.json')
+}
+
+/** The Bob API key: BOB_API_KEY if set, else the one saved during setup. */
+export function readBobKey(): string | undefined {
+  if (process.env.BOB_API_KEY) return process.env.BOB_API_KEY
+  try {
+    return (JSON.parse(readFileSync(bobKeyPath(), 'utf8')) as { key?: string }).key || undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function saveBobKey(key: string): void {
+  mkdirSync(dirname(bobKeyPath()), { recursive: true })
+  writeFileSync(bobKeyPath(), JSON.stringify({ key }) + '\n', { mode: 0o600 })
+}
+
 const defaultRunBob: RunBob = (args, cwd) => {
+  const key = readBobKey()
   const result = spawnSync('bob', args, {
     cwd,
+    env: key ? { ...process.env, BOB_API_KEY: key } : process.env,
     encoding: 'utf8',
     // `bob` is a .cmd shim on Windows, which only runs through a shell.
     shell: process.platform === 'win32',

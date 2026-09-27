@@ -1,10 +1,10 @@
 import { createInterface } from 'node:readline'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { CONFIG_FILE, loadConfig } from './config.js'
 import type { RunBob } from './tour-init.js'
-import { tourInit, BobMissingError, BobKeyMissingError } from './tour-init.js'
+import { tourInit, BobMissingError, BobKeyMissingError, readBobKey, saveBobKey } from './tour-init.js'
 import { tourInstall, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import type { TourInitResult } from './tour-init.js'
 import type { TourInstallResult } from './tour-install.js'
@@ -97,6 +97,9 @@ export interface InitFlowOptions {
   getRemoteFn?: GetRemoteFn
   /** Base URL for DocuGate (overrides DOCUGATE_URL env var). */
   baseUrl?: string
+  createSpaceFn?: (repo: string, name: string, docsDir: string) => Promise<{ name: string; owner: string; slug: string }>
+  /** Opens a URL in the browser; injectable for tests. */
+  openUrl?: (url: string) => void
 }
 
 export interface InitFlowResult {
@@ -108,6 +111,8 @@ export interface InitFlowResult {
   tourError?: string
   installResult?: TourInstallResult
   connectError?: string
+  /** Set when a folder above already has the project's setup; nothing was written here. */
+  alreadySetUp?: string
 }
 
 function makeDefaultIO(): IO {
@@ -129,6 +134,81 @@ function makeDefaultIO(): IO {
   }
 }
 
+/**
+ * The nearest folder above `root`, inside the same Git repository, that has
+ * DocuGate set up already (a docugate.json), if any.
+ */
+export function setUpAbove(root: string): string | undefined {
+  if (existsSync(join(root, '.git'))) return undefined
+  let dir = dirname(root)
+  while (dir !== dirname(dir)) {
+    if (existsSync(join(dir, CONFIG_FILE))) return dir
+    if (existsSync(join(dir, '.git'))) return undefined
+    dir = dirname(dir)
+  }
+  return undefined
+}
+
+/** Sets one key in docugate.json, keeping everything else as it was. */
+function saveSetting(root: string, key: string, value: unknown): void {
+  const path = join(root, CONFIG_FILE)
+  let existing: Record<string, unknown> = {}
+  if (existsSync(path)) {
+    try {
+      existing = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    } catch {
+      // unreadable: start again with this key
+    }
+  }
+  existing[key] = value
+  writeFileSync(path, JSON.stringify(existing, null, 2) + '\n')
+}
+
+const BOB_KEYS_URL = 'https://bob.ibm.com/docs/ide/account/api-keys'
+
+/**
+ * Bob Shell runs on its own with an API key, not the IDE sign-in. Setup gets
+ * one without anyone editing environment variables: open the page that makes
+ * it, paste it, and it is kept in ~/.docugate/bob.json, outside the repository.
+ */
+async function askForBobKey(io: IO, openUrl?: (url: string) => void): Promise<boolean> {
+  const pick = await choose(io, 'IBM Bob needs an API key to write the tour. Get one now?', [
+    'Yes, open the page to create an Inference key, then paste it here',
+    'Skip the tour for now',
+  ])
+  if (pick !== 1) return false
+  io.print(`  In your Bob instance: API keys, then create an Inference key.`)
+  io.print(`  ${BOB_KEYS_URL}`)
+  ;(openUrl ?? openInBrowser)(BOB_KEYS_URL)
+  const key = (await io.ask('  Paste the key and press Enter (it stays on this computer)', '')).trim()
+  if (!key) {
+    io.print('  No key pasted. Skipped the tour: run docugate tour init when you have one.')
+    return false
+  }
+  saveBobKey(key)
+  io.print('  Key saved in ~/.docugate/bob.json. It is never written into the repository.')
+  return true
+}
+
+function openInBrowser(url: string): void {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]]
+    : process.platform === 'darwin' ? ['open', [url]]
+    : ['xdg-open', [url]]
+  try {
+    spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref()
+  } catch {
+    // the URL is printed above
+  }
+}
+
+export const FRESHNESS = [
+  { value: 'push', label: 'On every push' },
+  { value: 'daily', label: 'Once a day (recommended: fewer AI runs)' },
+  { value: 'weekly', label: 'Once a week' },
+  { value: 'off', label: 'Never, I will ask for it' },
+] as const
+
 function saveRole(root: string, role: Role): void {
   const path = join(root, CONFIG_FILE)
   let existing: Record<string, unknown> = {}
@@ -143,7 +223,42 @@ function saveRole(root: string, role: Role): void {
   writeFileSync(path, JSON.stringify(existing, null, 2) + '\n')
 }
 
-const VALID_ROLES = new Set<string>(['frontend', 'backend', 'both'])
+const ROLE_CHOICES: Array<{ role: Role }> = [{ role: 'frontend' }, { role: 'backend' }, { role: 'both' }]
+
+const FRONTEND_DIRS = ['frontend', 'client', 'web']
+const BACKEND_DIRS = ['backend', 'server', 'api']
+const FRONTEND_MARKERS = ['index.html', 'vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.mjs', 'next.config.ts', 'angular.json', 'svelte.config.js']
+const BACKEND_MARKERS = ['go.mod', 'requirements.txt', 'pyproject.toml', 'manage.py', 'pom.xml', 'build.gradle', 'Gemfile', 'composer.json']
+
+/**
+ * What the repository probably is, from its folders and files, so the question
+ * can suggest an answer. Only a suggestion: the person always confirms it.
+ */
+export function guessRole(root: string): Role | undefined {
+  const has = (name: string) => existsSync(join(root, name))
+  const front = FRONTEND_DIRS.some(has)
+  const back = BACKEND_DIRS.some(has)
+  if (front && back) return 'both'
+  if (FRONTEND_MARKERS.some(has) || front) return 'frontend'
+  if (BACKEND_MARKERS.some(has) || back) return 'backend'
+  return undefined
+}
+
+/**
+ * A numbered choice: prints the options, and takes only a number. Enter picks
+ * the default. Nobody types a word during setup.
+ */
+export async function choose(io: IO, question: string, options: string[], fallback = 1): Promise<number> {
+  io.print('')
+  io.print(`  ${question}`)
+  options.forEach((option, i) => io.print(`    ${i + 1}  ${option}`))
+  for (;;) {
+    const answer = (await io.ask(`  Choose 1-${options.length} [${fallback}]`, String(fallback))).trim()
+    const n = Number(answer)
+    if (Number.isInteger(n) && n >= 1 && n <= options.length) return n
+    io.print(`  Type a number from 1 to ${options.length}.`)
+  }
+}
 
 function defaultGetRemote(root: string): string | null {
   try {
@@ -171,6 +286,17 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
   const yes = options.yes ?? false
   const port = options.port ?? DEFAULT_PORT
 
+  // One project gets one setup and one tour. Run inside frontend/ of a
+  // project already set up at its root, and init points there instead of
+  // starting a second one.
+  const parent = setUpAbove(root)
+  if (parent) {
+    io.print(`  This project is already set up in ${parent}.`)
+    io.print(`  One project has one tour: run docugate commands from that folder.`)
+    const above = loadConfig(parent)
+    return { created: [], kept: [], docsDir: above.docsDir, role: above.config.role, alreadySetUp: parent }
+  }
+
   // ── Step 1: base repo setup (docugate.json + docs/) ──────────────────────
   const base = init(root, { dir: options.dir, title: options.title })
 
@@ -193,18 +319,24 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
       // --yes with no --role: default to "both"
       role = 'both'
     } else {
-      // Interactive: ask once; re-prompt on invalid answer.
-      let answer = ''
-      while (!VALID_ROLES.has(answer)) {
-        answer = await io.ask(
-          'Is this repository the frontend, the backend, or both? [frontend/backend/both]',
-          'both',
-        )
-        if (!VALID_ROLES.has(answer)) {
-          io.print(`  Please answer frontend, backend, or both.`)
-        }
-      }
-      role = answer as Role
+      // Interactive: a numbered choice with examples, the likely answer
+      // suggested from the folders in the repository.
+      const guess = guessRole(root)
+      const guessNumber = String(ROLE_CHOICES.findIndex((c) => c.role === guess) + 1)
+      const n = await choose(
+        io,
+        `What is in this repository?${guess ? ` (it looks like ${guess})` : ''}`,
+        [
+          'Frontend   the app people see: React, Vue, Svelte, Next.js, plain HTML',
+          'Backend    the API or server: Node, Python, Go, Java, ...',
+          'Both       frontend and backend in one repository, for example:\n' +
+            '                 my-app/\n' +
+            '                 ├─ frontend/   (or client/, web/)\n' +
+            '                 └─ backend/    (or server/, api/)',
+        ],
+        guessNumber === '0' ? 3 : Number(guessNumber),
+      )
+      role = ROLE_CHOICES[n - 1].role
     }
   }
 
@@ -259,8 +391,11 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     if (!signedIn) {
       let doLogin = yes
       if (!yes) {
-        const answer = await io.ask('Sign in to DocuGate now? [Y/n]', 'y')
-        doLogin = !/^n(o)?$/i.test(answer)
+        doLogin =
+          (await choose(io, 'Sign in to DocuGate, so this repository can feed a space?', [
+            'Yes, open the browser to sign in',
+            'Skip for now (docugate login does it later)',
+          ])) === 1
       }
       if (doLogin) {
         try {
@@ -292,51 +427,80 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
           io.print(`  warning  ${connectError}`)
         }
 
-        if (spaces.length === 0 && !connectError) {
-          io.print(`  No spaces found. Create one first: ${BASE_URL}/dashboard/new`)
-        } else if (spaces.length > 0) {
-          const { docsDir: repoDocsDir } = loadConfig(root)
+        const { docsDir: repoDocsDir } = loadConfig(root)
+        const hasRepo = (sp: Space) => (sp.sources ?? []).some((src) => src.repo.toLowerCase() === repoSlug.toLowerCase())
+        const already = spaces.find(hasRepo)
 
-          if (yes) {
-            // --yes: auto-connect only when there is exactly one space.
-            if (spaces.length === 1) {
+        if (connectError) {
+          // the warning is printed already; carry on with the rest of setup
+        } else if (yes) {
+          // --yes: connect only when there is no doubt which space is meant.
+          if (already) {
+            io.print(`  ${repoSlug} is already in space "${already.name}".`)
+          } else if (spaces.length === 1) {
+            try {
+              await connectFn(spaces[0].id, repoSlug, repoDocsDir)
+              io.print(`  Connected ${repoSlug} to space "${spaces[0].name}".`)
+            } catch (err) {
+              connectError = (err as Error).message
+              io.print(`  warning  ${connectError}`)
+            }
+          } else if (spaces.length > 1) {
+            io.print(`  Several spaces found: run docugate init again without --yes to choose.`)
+          }
+        } else {
+          // Interactive: create a space, or pick one, or skip. Numbers only.
+          const choices = [
+            `Create a new space for ${repoSlug}`,
+            ...spaces.map((sp) => `${sp.name}  (${sp.owner}/${sp.slug})${hasRepo(sp) ? '  already reads this repository' : ''}`),
+            'Skip for now',
+          ]
+          const pick = await choose(
+            io,
+            `Which DocuGate space should document ${repoSlug}?`,
+            choices,
+            already ? spaces.indexOf(already) + 2 : 1,
+          )
+          if (pick === 1) {
+            try {
+              const createFn = options.createSpaceFn ?? (async (repo: string, name: string, dir: string) => {
+                const { createSpace } = await import('./api.js')
+                return createSpace(repo, name, dir)
+              })
+              const created = await createFn(repoSlug, loadConfig(root).config.title ?? repoSlug.split('/')[1], repoDocsDir)
+              io.print(`  Created space "${created.name}": ${BASE_URL}/${created.owner}/${created.slug}`)
+            } catch (err) {
+              connectError = (err as Error).message
+              io.print(`  warning  ${connectError}`)
+            }
+          } else if (pick <= spaces.length + 1) {
+            const sp = spaces[pick - 2]
+            if (hasRepo(sp)) {
+              io.print(`  ${repoSlug} is already in space "${sp.name}". Nothing to change.`)
+            } else {
               try {
-                await connectFn(spaces[0].id, repoSlug, repoDocsDir)
-                io.print(`  Connected ${repoSlug} to space "${spaces[0].name}".`)
+                await connectFn(sp.id, repoSlug, repoDocsDir)
+                io.print(`  Connected ${repoSlug} to space "${sp.name}".`)
               } catch (err) {
                 connectError = (err as Error).message
                 io.print(`  warning  ${connectError}`)
               }
-            } else {
-              io.print(`  Multiple spaces found — run docugate init again without --yes to choose:`)
-              for (const s of spaces) io.print(`    ${s.owner}/${s.slug}  ${s.name}`)
             }
           } else {
-            // Interactive: list spaces and ask.
-            io.print(`  Your spaces:`)
-            for (let i = 0; i < spaces.length; i++) {
-              io.print(`    ${i + 1}. ${spaces[i].name}  (${spaces[i].owner}/${spaces[i].slug})`)
-            }
-            const answer = await io.ask(
-              `Connect ${repoSlug} to which space? [1-${spaces.length}/skip]`,
-              'skip',
-            )
-            const idx = parseInt(answer, 10) - 1
-            if (!isNaN(idx) && idx >= 0 && idx < spaces.length) {
-              try {
-                await connectFn(spaces[idx].id, repoSlug, repoDocsDir)
-                io.print(`  Connected ${repoSlug} to space "${spaces[idx].name}".`)
-              } catch (err) {
-                connectError = (err as Error).message
-                io.print(`  warning  ${connectError}`)
-              }
-            } else {
-              io.print(`  Skipped connecting to a space.`)
-            }
+            io.print(`  Skipped. docugate init connects it any time.`)
           }
         }
       }
     }
+  }
+
+  // ── Step 3c: how often the docs are checked against the code ─────────────
+  if (io.isTTY && !loaded.config.freshness) {
+    const n = yes
+      ? 2
+      : await choose(io, 'How often should DocuGate check that your docs still match the code?', FRESHNESS.map((f) => f.label), 2)
+    saveSetting(root, 'freshness', FRESHNESS[n - 1].value)
+    io.print(`  Saved: ${FRESHNESS[n - 1].label.split(' (')[0].toLowerCase()}. Change "freshness" in docugate.json any time.`)
   }
 
   // ── Step 4: tour steps (frontend / both only) ─────────────────────────────
@@ -348,8 +512,14 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     // Decide whether to run tour init.
     let runTour = yes
     if (!yes && io.isTTY) {
-      const answer = await io.ask('Write the tour with IBM Bob? (costs Bobcoins) [y/N]', 'n')
-      runTour = /^y(es)?$/i.test(answer)
+      const pick = await choose(io, 'Set up the tour: which AI should read your code and write it?', [
+        'IBM Bob (uses Bobcoins)',
+        'IBM watsonx (coming soon)',
+        'Skip, I will write it in the browser',
+      ], 3)
+      if (pick === 2) io.print('  IBM watsonx is coming soon. Skipped for now: run docugate tour init when you are ready.')
+      runTour = pick === 1
+      if (runTour && !readBobKey() && !options.runBob) runTour = await askForBobKey(io, options.openUrl)
     }
 
     if (runTour) {
@@ -373,8 +543,11 @@ export async function initFlow(root: string, options: InitFlowOptions = {}): Pro
     // tour install: ask in TTY unless --yes.
     let runInstall = yes
     if (!yes && io.isTTY) {
-      const answer = await io.ask('Add the pill loader to your app? [Y/n]', 'y')
-      runInstall = !/^n(o)?$/i.test(answer)
+      runInstall =
+        (await choose(io, 'Add the DocuGate pill to your app? (development only)', [
+          'Yes, add it',
+          'Skip, I will run docugate tour install later',
+        ])) === 1
     }
 
     if (runInstall) {

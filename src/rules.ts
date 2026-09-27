@@ -65,6 +65,8 @@ export type DocugateConfig = {
   docsDir?: string
   title?: string
   role?: 'frontend' | 'backend' | 'both'
+  /** How often DocuGate checks the docs still match the code. */
+  freshness?: 'push' | 'daily' | 'weekly' | 'off'
   sidebar?: string[]
   api?: {
     generate?: {
@@ -77,4 +79,4 @@ export type DocugateConfig = {
   }
 }
 
-export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'role', 'sidebar', 'api'])
+export const KNOWN_KEYS = new Set(['$schema', 'docsDir', 'title', 'role', 'freshness', 'sidebar', 'api'])
