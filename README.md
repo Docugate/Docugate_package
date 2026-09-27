@@ -324,7 +324,9 @@ One per repository, at its root.
 
 ## IBM Bob 2.0 hackathon
 
-This repository is DocuGate's entry to the IBM Bob 2.0 hackathon (lablab.ai, September 25 to 27, 2026). To be clear about what was built when:
+This repository is DocuGate's entry to the IBM Bob 2.0 hackathon (lablab.ai, September 25 to 27, 2026). **Demo video: https://youtu.be/mgLUA-0r5MM** · Live demo: https://docugate-demo.vercel.app/invoices/inv_1004
+
+To be clear about what was built when:
 
 **Before the event:** the CLI that was already in DocuGate's private repository: `docugate init`, `docugate check`, and `docugate openapi`. Moved here with its history.
 
@@ -342,7 +344,7 @@ This repository is DocuGate's entry to the IBM Bob 2.0 hackathon (lablab.ai, Sep
 
 `docugate tour init` also runs IBM Bob itself, through Bob Shell. It installs a Tour Writer mode that may only edit `.docugate/tour/`, asks Bob to read the app's code, and never changes a tour file the user already has.
 
-**During the event, without Bob:** the Ledgerly demo app; the website side of `docugate login` on trydocugate.site; and fixes found while testing, such as Windows short paths in `tour serve` and the sign-in link on Windows.
+**During the event, without Bob:** the Ledgerly demo app; the website side of `docugate login`, creating docs repositories and the sign-in pages on trydocugate.site; and, after testing the package end to end, the redesign of the Tour button (checklist, Start walkthrough, one-switch Inspector with edit and remove), the numbered setup questions with docs spaces, finding the Bob key, the working spinner, starting the tour server with `npm run dev`, and fixes such as Windows paths with spaces.
 
 ---
 
