@@ -42,16 +42,19 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
   if (!res.ok) {
     let code: string | undefined
+    let detail: string | undefined
     try {
       const body = await res.clone().json() as unknown
       if (body && typeof body === 'object' && !Array.isArray(body)) {
         const b = body as Record<string, unknown>
         if (typeof b.error === 'string') code = b.error
+        if (typeof b.detail === 'string' && b.detail) detail = b.detail
       }
     } catch {
       // ignore JSON parse failure
     }
-    if (code) throw Object.assign(new Error(friendlyError(code)), { code })
+    // GitHub's own reason, when the server passed it on, after ours.
+    if (code) throw Object.assign(new Error(detail ? `${friendlyError(code)} (GitHub: ${detail})` : friendlyError(code)), { code, detail })
     throw new Error(`DocuGate request failed with status ${res.status}`)
   }
 

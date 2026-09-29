@@ -3,7 +3,7 @@
 DocuGate publishes documentation straight from the markdown in your GitHub repositories and shows a walkthrough pill on your running app so any developer can see what each element on screen is and where its data comes from.
 
 ```sh
-npm i -g docugate
+npm i docugate
 ```
 
 ---
@@ -13,29 +13,30 @@ npm i -g docugate
 Follow these in order. Every question during setup is a numbered choice: type
 the number and press Enter, or just press Enter for the suggested one.
 
-**1. Install DocuGate, once per computer.**
-
-```sh
-npm i -g docugate
-```
-
-This gives you the `docugate` command in every folder. To pin a version for a
-team instead, run `npm i -D docugate` inside the project and put `npx` in front
-of each command below.
-
-**2. Open your project's folder.**
+**1. Open your project's folder.**
 
 ```sh
 cd my-app
 ```
 
-Use the root of the repository: the folder with `.git` in it. If your frontend
-and backend are two repositories, do steps 2 to 4 in each one.
+Use the root of the repository: the folder with `.git` and `package.json` in
+it. If your frontend and backend are two repositories, do steps 1 to 3 in each.
+
+**2. Install DocuGate in the project.**
+
+```sh
+npm i docugate
+```
+
+Like any other package: everyone who clones the project gets the same version,
+and CI too. (A repository with no `package.json`, like a Go or Python backend,
+can install the command on the computer instead with `npm i -g docugate`, and
+then drop the `npx` from the commands below.)
 
 **3. Set everything up.**
 
 ```sh
-docugate init
+npx docugate init
 ```
 
 It asks, one at a time:
@@ -63,21 +64,15 @@ export BOB_API_KEY=<key>                                                # macOS,
 Setup writes `docugate.json` and `.docugate/tour/`. Commit both, so the next
 person who clones the repository needs no setup.
 
-**4. Start the tour server while you work.**
-
-```sh
-docugate tour serve
-```
-
-Leave it running in its own terminal. The pill only appears while it runs,
-which is why the pill never shows in production. If you started it at the end
-of step 3, it is already running.
-
-**5. Run your app as usual, in another terminal, and open it.**
+**4. Run your app as usual, and open it.**
 
 ```sh
 npm run dev
 ```
+
+Setup added a `predev` script, so `npm run dev` starts the DocuGate tour server
+first (one line, "DocuGate tour ready") and then your app. The pill only
+appears while that server runs, which is why it never shows in production.
 
 The DocuGate pill sits in the bottom-right corner. Click it:
 
@@ -89,10 +84,10 @@ The DocuGate pill sits in the bottom-right corner. Click it:
 
 Every change is saved straight into `.docugate/tour/`, so it shows up in `git diff`.
 
-**6. Keep the tour true.**
+**5. Keep the tour true.**
 
 ```sh
-docugate check
+npx docugate check
 ```
 
 It checks every step against the code and warns about any that went stale,
@@ -102,18 +97,19 @@ for example after a rename. Put it in CI so a stale tour fails the build (see
 **Later, when you need them:**
 
 ```sh
-docugate login           # sign in again, or on a new computer
-docugate whoami          # who am I signed in as?
-docugate tour init       # let IBM Bob write tours for screens that have none
-docugate tour install    # add the pill again (--remove takes it out)
-docugate logout          # disconnect this computer
+npx docugate login           # sign in again, or on a new computer
+npx docugate whoami          # who am I signed in as?
+npx docugate tour init       # let IBM Bob write tours for screens that have none
+npx docugate tour install    # add the pill again (--remove takes it out)
+npx docugate tour serve      # start the tour server by hand
+npx docugate logout          # disconnect this computer
 ```
 
 **Something not working?**
 
 | You see | Do this |
 | --- | --- |
-| No pill in the app | Check `docugate tour serve` is running, then refresh the page. |
+| No pill in the app | Start the app with `npm run dev` (it starts the tour server), or run `npx docugate tour serve`, then refresh the page. |
 | Bob can't run | Choose IBM Bob again in `docugate init` to paste a key, or install Bob Shell: https://bob.ibm.com/docs/shell/getting-started/install-and-setup |
 | Port 4178 is busy | `docugate tour serve --port 4179` and `docugate tour install --port 4179` |
 | "Already set up in ..." | You ran it in a subfolder. Run commands from the folder it names. |

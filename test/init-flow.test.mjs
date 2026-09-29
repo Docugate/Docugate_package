@@ -629,3 +629,41 @@ test('a Bob key saved under another name is found, and BOB_API_KEY itself is not
   assert.deepEqual(bobKeyCandidates({ WATSONX_API_KEY: 'k' }), ['WATSONX_API_KEY'])
   assert.deepEqual(bobKeyCandidates({ IBM_BOB_KEY: '' }), [])
 })
+
+test('DocuGate cannot create the docs repository: the GitHub CLI does, and the space is still made', async () => {
+  const dir = repo({})
+  const spaces = []
+  const { io, printed } = fakeIO(['backend', 'create', '1'])
+  await initFlow(dir, {
+    io,
+    getSessionFn: async () => SESSION_ALICE,
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => ({ spaces: [] }),
+    getRemoteFn: FAKE_REMOTE,
+    createDocsRepoFn: async () => { throw Object.assign(new Error('not allowed (GitHub: Resource not accessible by integration)'), { code: 'app_permission' }) },
+    ghDocsRepoFn: (name) => ({ repo: `alice/${name}`, url: `https://github.com/alice/${name}`, cloneUrl: '', seeded: true }),
+    createSpaceFn: async (r, name) => { spaces.push(r); return { name, owner: 'alice', slug: 'x' } },
+    baseUrl: 'https://example.com',
+  })
+  assert.ok(printed.some((l) => l.includes('Resource not accessible by integration')), "GitHub's reason is shown")
+  assert.equal(spaces.length, 1)
+  assert.match(spaces[0], /^alice\/.*-docs$/)
+})
+
+test('the docs repository already exists: it is reused, not an error', async () => {
+  const dir = repo({})
+  const spaces = []
+  const { io } = fakeIO(['backend', 'create', '1'])
+  await initFlow(dir, {
+    io,
+    getSessionFn: async () => ({ user: { githubLogin: 'alice', name: 'Alice', email: '', plan: 'free' } }),
+    loginFn: async () => ({ token: 'tok' }),
+    getSpacesFn: async () => ({ spaces: [] }),
+    getRemoteFn: FAKE_REMOTE,
+    createDocsRepoFn: async () => { throw Object.assign(new Error('exists'), { code: 'repo_exists' }) },
+    createSpaceFn: async (r, name) => { spaces.push(r); return { name, owner: 'alice', slug: 'x' } },
+    baseUrl: 'https://example.com',
+  })
+  assert.equal(spaces.length, 1)
+  assert.match(spaces[0], /^alice\/.*-docs$/)
+})

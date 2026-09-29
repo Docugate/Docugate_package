@@ -7,6 +7,7 @@ import type { RunBob } from './tour-init.js'
 import { tourInit, BobMissingError, BobKeyMissingError, readBobKey, useBobKeyForThisRun } from './tour-init.js'
 import type { CreatedRepo } from './api.js'
 import { bobKeyCandidates, startSpinner } from './spinner.js'
+import { logoBanner } from './logo.js'
 import { tourInstall, pillSnippetLine, DEFAULT_PORT } from './tour-install.js'
 import type { TourInitResult } from './tour-init.js'
 import type { TourInstallResult } from './tour-install.js'
@@ -15,6 +16,16 @@ import type { LoginOptions } from './auth.js'
 import type { Space } from './api.js'
 
 export type InitResult = { created: string[]; kept: string[]; docsDir: string }
+
+/**
+ * How to write a docugate command for the person reading it: installed in the
+ * project (npm i docugate) it runs through npx; installed on the computer it
+ * is plain `docugate`. Judged from where this copy of the CLI lives.
+ */
+export function asCommand(line: string, script = process.argv[1] ?? ''): string {
+  if (!/[\\/]node_modules[\\/]/.test(script) || /[\\/]npm[\\/]node_modules[\\/]|[\\/]lib[\\/]node_modules[\\/]/.test(script)) return line
+  return line.replace(/(^|[\s(`"'])docugate (init|login|logout|whoami|check|openapi|tour)\b/g, '$1npx docugate $2')
+}
 
 /**
  * Sets a repository up for DocuGate: a docugate.json, and a first page if the
@@ -104,6 +115,8 @@ export interface InitFlowOptions {
   createSpaceFn?: (repo: string, name: string, docsDir: string) => Promise<{ name: string; owner: string; slug: string }>
   /** Creates the documentation repository for a new space; injectable for tests. */
   createDocsRepoFn?: (name: string, isPrivate: boolean, title: string) => Promise<CreatedRepo>
+  /** Creates the docs repository with the GitHub CLI when DocuGate cannot; injectable for tests. */
+  ghDocsRepoFn?: (name: string, isPrivate: boolean, title: string, io: IO) => CreatedRepo | null
   /** Opens a URL in the browser; injectable for tests. */
   openUrl?: (url: string) => void
 }
@@ -150,9 +163,49 @@ export function makeDefaultIO(): IO {
       })
     },
     print(line) {
-      console.log(line)
+      console.log(asCommand(line))
     },
   }
+}
+
+function gh(args: string[], cwd = process.cwd()): { ok: boolean; out: string } {
+  try {
+    const out = execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    return { ok: true, out: out.trim() }
+  } catch (err) {
+    const e = err as { stderr?: string; message: string }
+    return { ok: false, out: (e.stderr ?? e.message).trim() }
+  }
+}
+
+/**
+ * The docs repository through the GitHub CLI, signed in as the person: create
+ * it with a README, then write docs/index.md into it through the GitHub API.
+ * Null when gh is not installed or not signed in, with the reason printed.
+ */
+function createDocsRepoWithGh(name: string, isPrivate: boolean, title: string, io: IO): CreatedRepo | null {
+  const who = gh(['api', 'user', '--jq', '.login'])
+  if (!who.ok || !who.out) {
+    io.print(`  To create it another way, install the GitHub CLI (https://cli.github.com), run gh auth login, then docugate init again.`)
+    io.print(`  Or create ${name} on github.com and pick "connect" in docugate init.`)
+    return null
+  }
+  const stop = startSpinner(['Creating the docs repository with the GitHub CLI', 'Writing its first page'])
+  const made = gh(['repo', 'create', name, isPrivate ? '--private' : '--public', '--add-readme',
+    '--description', `Documentation for ${title}, published with DocuGate`])
+  if (!made.ok && !/already exists/i.test(made.out)) {
+    stop()
+    io.print(`  warning  The GitHub CLI could not create ${name}: ${made.out.split(/\r?\n/).pop()}`)
+    return null
+  }
+  const full = `${who.out}/${name}`
+  const page = `# ${title}\n\nWelcome. This is the start of the documentation for ${title}.\n\nEvery markdown file in this \`docs/\` folder becomes a page on DocuGate.\n`
+  const seeded = gh(['api', '-X', 'PUT', `repos/${full}/contents/docs/index.md`,
+    '-f', 'message=docs: first page, created by DocuGate',
+    '-f', `content=${Buffer.from(page).toString('base64')}`]).ok
+  stop()
+  io.print(`  ${green('✓')} Created https://github.com/${full} with the GitHub CLI`)
+  return { repo: full, url: `https://github.com/${full}`, cloneUrl: `https://github.com/${full}.git`, seeded }
 }
 
 /**
@@ -174,18 +227,38 @@ async function createDocsSpace(
   const repoName = `${projectName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '')}-docs`
 
   const stop = startSpinner(['Creating the docs repository on GitHub', 'Writing its first page', 'Almost there'])
-  let repo: CreatedRepo
+  let repo: CreatedRepo | undefined
   try {
     repo = await (options.createDocsRepoFn ?? (async (name: string, priv: boolean, title: string) => {
       const { createRepo } = await import('./api.js')
       return createRepo(name, priv, { title })
     }))(repoName, visibility === 2, projectName)
     stop()
-    io.print(`  Created ${repo.url}`)
+    io.print(`  ${green('✓')} Created ${repo.url}`)
   } catch (err) {
     stop()
-    io.print(`  warning  ${(err as Error).message}`)
-    return undefined
+    const { code } = err as { code?: string }
+    // DocuGate could not create it (the app's permission, or GitHub's rules
+    // for app tokens). The person's own GitHub CLI can: try that before
+    // giving up, so the setup still ends with a space.
+    if (code === 'app_permission' || code === 'github_error') {
+      io.print(`  ${dimmed((err as Error).message)}`)
+      repo = (options.ghDocsRepoFn ?? createDocsRepoWithGh)(repoName, visibility === 2, projectName, io) ?? undefined
+    } else if (code === 'repo_exists') {
+      // A second run, or a repository made by hand: use it rather than stop.
+      const login = await (options.getSessionFn ?? (async () => (await import('./api.js')).getSession()))()
+        .then((s) => s.user?.githubLogin)
+        .catch(() => undefined)
+      if (login) {
+        repo = { repo: `${login}/${repoName}`, url: `https://github.com/${login}/${repoName}`, cloneUrl: '' }
+        io.print(`  ${repo.repo} already exists: using it for the docs.`)
+      } else {
+        io.print(`  warning  ${(err as Error).message}`)
+      }
+    } else {
+      io.print(`  warning  ${(err as Error).message}`)
+    }
+    if (!repo) return undefined
   }
 
   const createFn = options.createSpaceFn ?? (async (r: string, name: string, dir: string) => {
@@ -347,13 +420,10 @@ const green = paint('32')
 
 /** DocuGate's owl, drawn small: cream eyes, gold beak. */
 export function banner(): string[] {
-  return [
-    '',
-    `   ${dimmed('╭─────╮')}`,
-    `   ${dimmed('│')} ${cream('◉ ◉')} ${dimmed('│')}   ${bold('DocuGate')}`,
-    `   ${dimmed('│')}  ${gold('▾')}  ${dimmed('│')}   ${dimmed('Tours and docs for your codebase')}`,
-    `   ${dimmed('╰─────╯')}`,
-  ]
+  const text = [bold(cream('DocuGate')), dimmed('Tours and docs for your codebase')]
+  // Without color there is no picture to draw: just the name.
+  if (!colorOn()) return ['', `  DocuGate · Tours and docs for your codebase`, '']
+  return logoBanner(text)
 }
 
 /**
